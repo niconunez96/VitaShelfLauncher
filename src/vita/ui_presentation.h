@@ -9,7 +9,7 @@ typedef struct { const char *asset; uint32_t rgb; } VpUiPlatform;
 typedef struct { int motion_ms, radius, wallpaper_alpha; } VpUiAppearance;
 #define VP_UI_GRID_PAGE 10
 #define VP_UI_LIST_PAGE 5
-#define VP_UI_CONSOLE_PAGE 8
+#define VP_UI_CONSOLE_PAGE 6
 #define VP_UI_CAROUSEL_PAGE 7
 const VpUiPlatform *vp_ui_platform(const char *slug);
 const char *vp_ui_platform_label(const char *slug);

@@ -69,7 +69,7 @@ VpUiRect vp_ui_tile(size_t slot) {
 }
 
 VpUiRect vp_ui_console_tile(size_t slot) {
-    VpUiRect r = {44 + (int)slot * 110, 280, 102, 142};
+    VpUiRect r = {44 + (int)slot * 148, 252, 136, 170};
     return r;
 }
 
@@ -100,7 +100,8 @@ static bool inside(VpUiRect r, int x, int y) {
 }
 
 size_t vp_ui_console_start(size_t selected, size_t total) {
-    size_t start = selected > 4 ? selected-4 : 0;
+    size_t center = VP_UI_CONSOLE_PAGE/2;
+    size_t start = selected > center ? selected-center : 0;
     size_t last = total > VP_UI_CONSOLE_PAGE ? total-VP_UI_CONSOLE_PAGE : 0;
     return start > last ? last : start;
 }

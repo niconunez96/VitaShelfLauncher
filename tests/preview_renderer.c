@@ -145,7 +145,7 @@ int main(int argc,char **argv) {
     const char *slugs[]={"arcade","dreamcast","gba","nds","gamecube","psx","psp","3ds","ps2","snes","genesis","wii"};
     const char *titles[]={"Bloody Roar II","Castlevania: Symphony of the Night","Crash Bandicoot","Gran Turismo","Metal Gear Solid",
         "Resident Evil","Silent Hill","Dino Crisis","Tomb Raider","Ridge Racer","A game with a very long title and accents: aventura fantástica","Another game"};
-    const char *cases[]={"platforms","carousel","list","grid","settings","general","interface","downloads","downloads-empty","romm","storage","about","store","empty","last-page"};
+    const char *cases[]={"platforms","carousel","list","grid","settings","general","interface","downloads","downloads-empty","romm","storage","about","store","empty","last-page","platforms-arcade","platforms-gba","platforms-last"};
     size_t c,i;
     cr=cairo_create(canvas); assert(!FT_Init_FreeType(&freetype)); assert(vp_ui_fonts_load(&typefaces));
     assert(vp_ui_backdrop_init());
@@ -196,6 +196,7 @@ int main(int argc,char **argv) {
         if (c==12) app.active_screen=VP_SCREEN_STORES;
         if (c==13) frame.group_count=0;
         if (c==14) { app.library_level=VP_LEVEL_ROMS; app.active_view=VP_VIEW_GRID; app.selected_item=11; }
+        if (c>=15) app.selected_platform=c==15?0:(c==16?2:11);
         (void)snprintf(app.active_platform,sizeof(app.active_platform),"psx");
         frame.romm_state=VP_ROMM_CONNECTED;
         for (i=0;i<10;i++) frame.covers[i]=covers[i];
@@ -210,6 +211,6 @@ int main(int argc,char **argv) {
     vp_ui_fonts_free(&typefaces);
     assert(!textures && !fonts && drawn>0);
     cairo_destroy(cr); cairo_surface_destroy(canvas); FT_Done_FreeType(freetype);
-    puts("Blueglass renderer: 14 states, actual Inter metrics, UTF-8 truncation, missing resources and cleanup passed");
+    puts("Blueglass renderer: 18 states, actual Inter metrics, UTF-8 truncation, missing resources and cleanup passed");
     return 0;
 }

@@ -52,6 +52,9 @@ if(DEFINED ENV{VITASDK})
   foreach(asset IN LISTS VP_BLUEGLASS_LOGOS)
     list(APPEND VP_BLUEGLASS_FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/logos/${asset}.png" "assets/blueglass/logos/${asset}.png")
+    string(REPLACE "platform_" "header_" header "${asset}")
+    list(APPEND VP_BLUEGLASS_FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/headers/${header}.png" "assets/blueglass/headers/${header}.png")
     string(REPLACE "platform_" "" system "${asset}")
     list(APPEND VP_BLUEGLASS_FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/backgrounds/${system}.png" "assets/blueglass/backgrounds/${system}.png")
