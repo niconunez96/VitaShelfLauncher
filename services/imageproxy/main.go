@@ -111,11 +111,19 @@ func (service *handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		http.Error(writer, "mode must be cover or contain", http.StatusBadRequest)
 		return
 	}
+	trim := request.URL.Query().Get("trim")
+	if trim != "" && trim != "alpha" {
+		http.Error(writer, "trim must be alpha or empty", http.StatusBadRequest)
+		return
+	}
 
 	source, err := service.decodeImage(request.Body)
 	if err != nil {
 		service.writeImageError(writer, err)
 		return
+	}
+	if trim == "alpha" {
+		source = trimTransparent(source)
 	}
 	writer.Header().Set("Content-Type", "image/png")
 	writer.Header().Set("Cache-Control", "public, max-age=86400")
@@ -183,6 +191,40 @@ func (service *handler) writeImageError(writer http.ResponseWriter, err error) {
 	}
 	http.Error(writer, message, status)
 	service.logger.Printf("image request failed: %v", err)
+}
+
+type trimmedImage struct {
+	image.Image
+	area image.Rectangle
+}
+
+func (source trimmedImage) Bounds() image.Rectangle { return source.area }
+
+// Only alpha=0 is padding: even the faintest antialiased edge is retained.
+// Empty images keep their original bounds so resizing never divides by zero.
+func trimTransparent(source image.Image) image.Image {
+	bounds := source.Bounds()
+	left, top, right, bottom := bounds.Max.X, bounds.Max.Y, bounds.Min.X, bounds.Min.Y
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			_, _, _, alpha := source.At(x, y).RGBA()
+			if alpha == 0 {
+				continue
+			}
+			left, top = min(left, x), min(top, y)
+			right, bottom = max(right, x+1), max(bottom, y+1)
+		}
+	}
+	area := image.Rect(left, top, right, bottom)
+	if left >= right || top >= bottom || area == bounds {
+		return source
+	}
+	if cropper, ok := source.(interface {
+		SubImage(image.Rectangle) image.Image
+	}); ok {
+		return cropper.SubImage(area)
+	}
+	return trimmedImage{Image: source, area: area}
 }
 
 func centerCropAndScale(source image.Image, targetWidth, targetHeight int) *image.NRGBA {

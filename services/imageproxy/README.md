@@ -57,6 +57,23 @@ Example: `/image?width=256&height=320&mode=contain` returns a square source as
 `256×256`, a 1:2 portrait as `160×320`, or a 2:1 landscape as `256×128`.
 `mode=cover` returns exactly the requested dimensions. Other mode values return 400.
 
+### Trim transparent logo margins
+
+Add `trim=alpha` to remove fully transparent outer margins **before** resizing:
+
+```text
+POST /image?width=128&height=128&mode=contain&trim=alpha
+Content-Type: application/octet-stream
+
+<source PNG bytes>
+```
+
+The complete visible logo is fitted inside the requested bounds without stretching.
+Partially transparent pixels, including antialiased edges, are retained. Opaque and
+fully transparent images are unchanged by trimming. Without `trim` (or with an empty
+value), processing is identical to earlier versions; existing Vita clients need no
+changes. Unsupported trim values return 400. The existing input/output limits apply.
+
 The caller downloads the source image and sends its raw bytes. This keeps the service independent from RomM authentication and prevents it from becoming an SSRF proxy.
 
 ## Cache note
