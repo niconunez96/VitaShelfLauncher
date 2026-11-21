@@ -17,6 +17,11 @@ static Asset assets[]={
     A("platform_psp"),A("platform_vita"),A("platform_arcade"),A("platform_neogeo"),A("platform_pce"),
     A("platform_atari2600"),A("platform_wonderswan"),A("platform_homebrew"),A("platform_generic"),
     A("platform_dreamcast"),A("platform_n3ds"),A("platform_gamecube"),A("platform_ps2"),A("platform_wii"),
+    A("header_nes"),A("header_famicom"),A("header_snes"),A("header_gameboy"),A("header_gameboycolor"),
+    A("header_gba"),A("header_nds"),A("header_genesis"),A("header_mastersystem"),A("header_gamegear"),
+    A("header_psx"),A("header_psp"),A("header_vita"),A("header_arcade"),A("header_neogeo"),A("header_pce"),
+    A("header_atari2600"),A("header_wonderswan"),A("header_homebrew"),A("header_generic"),
+    A("header_dreamcast"),A("header_n3ds"),A("header_gamecube"),A("header_ps2"),A("header_wii"),
     A("ui_library"),A("ui_store"),A("ui_settings"),A("ui_download"),A("ui_check"),A("ui_star"),
     A("ui_home"),A("ui_key"),A("ui_sync"),A("ui_folder"),A("ui_general"),A("ui_interface"),
     A("ui_storage"),A("ui_info"),A("ui_server"),A("ui_psx"),A("ui_romm"),A("ui_buttons")
@@ -76,17 +81,20 @@ static vita2d_texture *asset(const char *name) {
         Asset *a=&assets[i];
         if (strcmp(name,a->name)) continue;
         if (!a->attempted && asset_budget>0) {
-            char path[160]; unsigned char header[29]; SceUID fd;
+            char path[160]; unsigned char header[29]={0}; SceUID fd;
+            bool heading=!strncmp(name,"header_",7);
             unsigned int w=!strncmp(name,"platform_",9) || !strcmp(name,"ui_buttons")?128:(!strcmp(name,"focus")?96:64);
             unsigned int h=w;
             a->attempted=true; --asset_budget;
-            (void)snprintf(path,sizeof(path),"app0:assets/blueglass/%s/%s.png",!strncmp(name,"platform_",9)?"logos":"ui",name);
+            (void)snprintf(path,sizeof(path),"app0:assets/blueglass/%s/%s.png",heading?"headers":(!strncmp(name,"platform_",9)?"logos":"ui"),name);
             fd=sceIoOpen(path,SCE_O_RDONLY,0);
             if (fd>=0) {
                 int count=sceIoRead(fd,header,sizeof(header));
                 SceOff length=sceIoLseek(fd,0,SCE_SEEK_END); sceIoClose(fd);
+                unsigned int actual_w=(unsigned int)header[18]*256+header[19];
+                unsigned int actual_h=(unsigned int)header[22]*256+header[23];
                 if (count==(int)sizeof(header) && length>0 && length<=512*1024 && vp_safe_cover_png(header,sizeof(header)) &&
-                    ((unsigned int)header[18]*256+header[19])==w && ((unsigned int)header[22]*256+header[23])==h) {
+                    (heading?(actual_w>0 && actual_w<=128 && actual_h>0 && actual_h<=64):(actual_w==w && actual_h==h))) {
                     a->texture=vita2d_load_PNG_file(path);
                     if (a->texture) vita2d_texture_set_filters(a->texture,SCE_GXM_TEXTURE_FILTER_LINEAR,SCE_GXM_TEXTURE_FILTER_LINEAR);
                 }
@@ -154,6 +162,15 @@ static const char *platform_asset(const VpUiFrame *f) {
     return vp_ui_platform(f->app->active_platform)->asset;
 }
 
+static const char *heading_asset(const VpUiFrame *f) {
+    static char name[64];
+    const char *logo=platform_asset(f);
+    if (!logo) return NULL;
+    if (!strcmp(logo,"platform_psx")) return "ui_psx";
+    (void)snprintf(name,sizeof(name),"header_%s",logo+9);
+    return name;
+}
+
 void vp_ui_prepare(const VpUiFrame *f) {
     static const char *common[]={"emblem","focus","ui_buttons","ui_library","ui_store","ui_settings","ui_download","ui_check","ui_star","ui_psx"};
     size_t i,start;
@@ -166,7 +183,7 @@ void vp_ui_prepare(const VpUiFrame *f) {
         const char *icons[]={"ui_general","ui_interface","ui_download","ui_romm","ui_storage","ui_info","ui_home","ui_key","ui_sync","ui_folder"};
         for (i=0;i<sizeof(icons)/sizeof(icons[0]);i++) (void)asset(icons[i]);
     }
-    if (platform_asset(f)) (void)asset(platform_asset(f));
+    if (heading_asset(f)) (void)asset(heading_asset(f));
     asset_budget=0;
     vp_ui_backdrop_prepare(f->app->active_screen==VP_SCREEN_LIBRARY && f->app->library_level==VP_LEVEL_PLATFORMS?
         platform_asset(f):NULL,sceKernelGetProcessTimeWide());
@@ -223,16 +240,16 @@ static void header(const VpUiFrame *f) {
 }
 
 static void heading(const VpUiFrame *f) {
-    char subtitle[96]; const char *title="Biblioteca",*logo=platform_asset(f);
+    char subtitle[96]; const char *title="Biblioteca",*logo=heading_asset(f);
     if (f->app->active_screen!=VP_SCREEN_LIBRARY) return;
     if (f->app->library_level==VP_LEVEL_ROMS) {
         title=f->visible_count?f->app->catalog.items[f->visible[position(f)]].platform_display:f->app->active_platform;
         (void)snprintf(subtitle,sizeof(subtitle),"%u juegos",(unsigned)f->visible_count);
     } else (void)snprintf(subtitle,sizeof(subtitle),"%u consolas   •   %u juegos",(unsigned)f->group_count,(unsigned)f->app->catalog.count);
-    if (logo && !strcmp(logo,"platform_psx")) icon("ui_psx",45,81,54);
-    else if (logo) fit(asset(logo),40,81,65,51,0xffffffffu);
-    text(f,VP_TYPE_PAGE_TITLE,118,115,670,ink,title);
-    text(f,VP_TYPE_PAGE_SUBTITLE,119,140,650,C(237,244,255,240),subtitle);
+    if (logo && !strcmp(logo,"ui_psx")) icon(logo,61,81,54);
+    else if (logo) fit(asset(logo),24,76,128,64,0xffffffffu);
+    text(f,VP_TYPE_PAGE_TITLE,172,115,620,ink,title);
+    text(f,VP_TYPE_PAGE_SUBTITLE,173,140,610,C(237,244,255,240),subtitle);
     if (f->app->library_level==VP_LEVEL_ROMS && f->visible_count) {
         char count[32]; (void)snprintf(count,sizeof(count),"%u / %u",(unsigned)position(f)+1,(unsigned)f->visible_count);
         text(f,VP_TYPE_STATUS,870,141,70,C(17,37,82,255),count);
@@ -247,8 +264,8 @@ static void platforms(const VpUiFrame *f) {
         bool selected=i==f->app->selected_platform;
         if (selected) { r.y-=(int)(7*entrance); r.h+=7; }
         glass(r,selected,true);
-        fit(asset(platform->asset),r.x+9,r.y+21,r.w-18,84,0xffffffffu);
-        round_rect(r.x+(r.w-34)/2,r.y+r.h-16,34,4,2,rgb(platform->rgb));
+        fit(asset(platform->asset),r.x+10,r.y+22,r.w-20,116,0xffffffffu);
+        round_rect(r.x+(r.w-42)/2,r.y+r.h-16,42,4,2,rgb(platform->rgb));
     }
     if (f->group_count) {
         const VpPlatformGroup *group=&f->groups[f->app->selected_platform]; char detail[VP_TEXT+40];

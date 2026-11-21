@@ -8,8 +8,9 @@
   https://github.com/fabricecaruso/es-theme-carbon. The complete upstream attribution
   and CC BY-NC-SA notice are preserved in `sources/Carbon-README.txt` (also bundled).
   Logos/trademarks belong to their respective owners. Changes: rasterization,
-  transparent padding, white adaptation of dark monochrome details, resizing and
-  composition of hardware illustrations on the generated wallpaper. Adapted Carbon
+  transparent padding, white adaptation of dark monochrome details, resizing,
+  stacking of original marks/lettering for cards (including GAME BOY / ADVANCE),
+  alpha-trimmed header variants, and composition of hardware illustrations on the generated wallpaper. Adapted Carbon
   artwork retains its upstream CC BY-NC-SA terms. Original SVGs and source console
   images are retained under `sources/`; exact revisions and URLs are in `provenance.json`.
 - **Wallpaper and generated hardware backgrounds**: original FLUX 3 Image generations

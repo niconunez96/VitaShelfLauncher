@@ -239,6 +239,77 @@ def compact_logos():
     canvas.save(OUT / "logos/platform_generic.png",optimize=True)
 
 
+def service_resize(image, endpoint, size):
+    """Send raster bytes to imageproxy; the service owns trimming and resampling."""
+    body = io.BytesIO()
+    image.save(body, format="PNG")
+    query = urllib.parse.urlencode(dict(width=size[0], height=size[1], mode="contain", trim="alpha"))
+    url = endpoint + ("&" if "?" in endpoint else "?") + query
+    request = urllib.request.Request(url, data=body.getvalue(), headers={"Content-Type": "application/octet-stream"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        data = response.read(512*1024+1)
+        if response.headers.get_content_type() != "image/png" or len(data) > 512*1024:
+            raise ValueError("imageproxy returned an invalid logo response")
+    result = Image.open(io.BytesIO(data))
+    if not (0 < result.width <= size[0] and 0 < result.height <= size[1]):
+        raise ValueError("imageproxy returned an oversized logo")
+    return result.convert("RGBA")
+
+
+def service_logos(endpoint):
+    """Rebuild card plates and tight header variants from the retained originals."""
+    (OUT / "headers").mkdir(parents=True, exist_ok=True)
+    provenance = json.loads((OUT / "provenance.json").read_text())
+    provenance = [entry for entry in provenance if not entry["file"].startswith("headers/")]
+    for name in [*LOGOS, "generic"]:
+        source = f"sources/{name}.svg" if name != "generic" else "ui/emblem.png"
+        if name == "generic":
+            image = Image.open(OUT / source).convert("RGBA")
+        else:
+            vector = (OUT / source).read_bytes()
+            image = Image.open(io.BytesIO(cairosvg.svg2png(bytestring=vector, output_width=1024))).convert("RGBA")
+            image.putdata([(245,248,255,a) if max(r,g,b)<85 else (r,g,b,a) for r,g,b,a in image.getdata()])
+        canvas = Image.new("RGBA", (128,128))
+        split = {"psx":.27, "gamecube":.23, "dreamcast":.21}.get(name)
+        if split:
+            edge = int(image.width*split)
+            mark = service_resize(image.crop((0,0,edge,image.height)), endpoint, (72,76))
+            word = service_resize(image.crop((edge,0,image.width,image.height)), endpoint, (116,28))
+            canvas.alpha_composite(mark, ((128-mark.width)//2, 4))
+            canvas.alpha_composite(word, ((128-word.width)//2, 92))
+        elif name == "gba":
+            # Stack the original GAME BOY / ADVANCE lettering, not a replacement icon.
+            # The italic words overlap horizontally; a vertical crop cuts the A/Y.
+            mask = Image.new("L", image.size)
+            ImageDraw.Draw(mask).polygon([(0,0), (int(image.width*.535),0),
+                (int(image.width*.496),int(image.height*.62)), (int(image.width*.496),image.height),
+                (0,image.height)], fill=255)
+            empty = Image.new("RGBA", image.size)
+            first = service_resize(Image.composite(image,empty,mask), endpoint, (116,48))
+            second = service_resize(Image.composite(empty,image,mask), endpoint, (116,48))
+            top = (128-first.height-second.height-6)//2
+            canvas.alpha_composite(first, ((128-first.width)//2, top))
+            canvas.alpha_composite(second, ((128-second.width)//2, top+first.height+6))
+        else:
+            fitted = service_resize(image, endpoint, (116,108))
+            canvas.alpha_composite(fitted, ((128-fitted.width)//2, (128-fitted.height)//2))
+        canvas.save(OUT / "logos" / f"platform_{name}.png", optimize=True)
+        header = service_resize(canvas if split or name == "gba" else image, endpoint, (128,64))
+        header.save(OUT / "headers" / f"header_{name}.png", optimize=True)
+        card_file = f"logos/platform_{name}.png"
+        treatment = "Original lettering/marks composed on a 128x128 card; imageproxy contain + trim=alpha."
+        entry = next((entry for entry in provenance if entry["file"] == card_file), None)
+        if entry is None:
+            provenance.append({"file":card_file, "source":source, "treatment":treatment})
+        else:
+            entry["treatment"] = treatment
+        provenance.append({"file":f"headers/header_{name}.png", "source":source,
+                           "treatment":"Original logo, alpha-trimmed and fitted within 128x64 by imageproxy."
+                           + (" Original GAME BOY / ADVANCE lettering stacked." if name == "gba" else "")})
+    (OUT / "provenance.json").write_text(json.dumps(provenance, indent=2)+"\n")
+    print("Prepared 25 card logos and 25 transparent header logos through imageproxy.")
+
+
 def preview_fixtures(directory):
     """Optional host-only sample covers; never included in the application VPK."""
     target=Path(directory)
@@ -268,6 +339,7 @@ if __name__ == "__main__":
     parser.add_argument("--finish", action="store_true")
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--controls",action="store_true")
+    parser.add_argument("--logo-service", metavar="URL", help="Rebuild console card/header logos using an imageproxy /image endpoint and retained sources")
     parser.add_argument("--background", nargs=2, metavar=("NAME", "SOURCE"))
     parser.add_argument("--preview-fixtures",metavar="DIRECTORY")
     args = parser.parse_args()
@@ -283,3 +355,5 @@ if __name__ == "__main__":
         compact_logos()
     if args.controls:
         controls_assets()
+    if args.logo_service:
+        service_logos(args.logo_service)

@@ -35,9 +35,14 @@ int main(void) {
         assert(vp_ui_touch_tile_slot(r.x, r.y) == (int)i);
         assert(vp_ui_touch_tile_slot(r.x + r.w - 1, r.y + r.h - 1) == (int)i);
     }
+    assert(VP_UI_CONSOLE_PAGE==6);
     for (i=0;i<VP_UI_CONSOLE_PAGE;i++) {
         VpUiRect r=vp_ui_console_tile(i);
+        assert(r.w==136 && r.h==170);
+        assert(r.x>=24 && r.x+r.w<=936 && r.y>=158 && r.y+r.h<=440);
         assert(vp_ui_touch_console_slot(r.x+1,r.y+1)==(int)i);
+        assert(vp_ui_touch_console_slot(r.x+r.w-1,r.y+r.h-1)==(int)i);
+        assert(vp_ui_touch_console_slot(r.x+r.w,r.y)==-1);
     }
     for (i=0;i<VP_UI_LIST_PAGE;i++) {
         VpUiRect r=vp_ui_list_row(i);
@@ -53,8 +58,17 @@ int main(void) {
         assert(r.x==310 && r.y==148 && r.w==600 && r.h==270);
         assert(r.x+r.w==910);
     }
-    assert(vp_ui_console_start(0,12)==0 && vp_ui_console_start(11,12)==4);
+    assert(vp_ui_console_start(0,12)==0 && vp_ui_console_start(11,12)==6);
     assert(vp_ui_console_start(3,4)==0);
+    assert(vp_ui_console_start(0,0)==0);
+    for (i=1;i<=25;i++) {
+        size_t selected;
+        for (selected=0;selected<i;selected++) {
+            size_t start=vp_ui_console_start(selected,i);
+            assert(start<=selected && selected<start+VP_UI_CONSOLE_PAGE);
+            assert(i<=VP_UI_CONSOLE_PAGE?start==0:start+VP_UI_CONSOLE_PAGE<=i);
+        }
+    }
     assert(vp_ui_touch_tile_slot(47,158)==-1);
     assert(vp_ui_touch_tile_slot(210,158)==-1);
     assert(vp_ui_touch_dock_screen(256,20)==0);

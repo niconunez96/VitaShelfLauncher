@@ -10,6 +10,19 @@ ASSETS = ROOT / "assets/blueglass"
 
 
 class ArtworkInventoryTests(unittest.TestCase):
+    def test_every_console_has_a_tightly_fitted_header_logo(self):
+        cmake = (ROOT / "CMakeLists.txt").read_text()
+        platforms = re.search(r"set\(VP_BLUEGLASS_LOGOS\s+(.*?)\)",cmake,re.S).group(1).split()
+        names = {name.replace("platform_", "header_", 1) for name in platforms}
+        self.assertEqual({p.stem for p in (ASSETS / "headers").glob("*.png")}, names)
+        self.assertIn("assets/blueglass/headers/", cmake)
+        for name in names:
+            data = (ASSETS / "headers" / f"{name}.png").read_bytes()
+            width, height = struct.unpack(">II", data[16:24])
+            self.assertTrue(1 <= width <= 128 and 1 <= height <= 64, name)
+            self.assertEqual(data[25], 6, name)
+            self.check_png(ASSETS / "headers" / f"{name}.png", (width,height), 64*1024)
+
     def test_every_logo_has_a_packaged_native_background(self):
         cmake = (ROOT / "CMakeLists.txt").read_text()
         names = re.search(r"set\(VP_BLUEGLASS_LOGOS\s+(.*?)\)",cmake,re.S).group(1).split()

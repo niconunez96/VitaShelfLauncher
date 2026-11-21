@@ -11,7 +11,7 @@ class BlueglassPackageTests(unittest.TestCase):
         with zipfile.ZipFile(ROOT / "dist/vitashelflauncher.vpk") as package:
             self.assertIsNone(package.testzip())
             names=set(package.namelist())
-            for folder in ("logos","backgrounds","ui","fonts"):
+            for folder in ("logos","headers","backgrounds","ui","fonts"):
                 for source in (ROOT / "assets/blueglass" / folder).iterdir():
                     relative=source.relative_to(ROOT).as_posix()
                     self.assertIn(relative,names)
