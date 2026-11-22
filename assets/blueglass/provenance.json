@@ -164,46 +164,6 @@
     "treatment": "Original lettering/marks composed on a 128x128 card; imageproxy contain + trim=alpha."
   },
   {
-    "file": "backgrounds/psx.png",
-    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/psx.png",
-    "treatment": "Original hardware composited on the FLUX general background."
-  },
-  {
-    "file": "backgrounds/nes.png",
-    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/nes.png",
-    "treatment": "Original hardware composited on the FLUX general background."
-  },
-  {
-    "file": "backgrounds/wonderswan.png",
-    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/wonderswan.png",
-    "treatment": "Original hardware composited on the FLUX general background."
-  },
-  {
-    "file": "backgrounds/dreamcast.png",
-    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/dreamcast.png",
-    "treatment": "Original hardware composited on the FLUX general background."
-  },
-  {
-    "file": "backgrounds/n3ds.png",
-    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/3ds.png",
-    "treatment": "Original hardware composited on the FLUX general background."
-  },
-  {
-    "file": "backgrounds/gamecube.png",
-    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/gc.png",
-    "treatment": "Original hardware composited on the FLUX general background."
-  },
-  {
-    "file": "backgrounds/ps2.png",
-    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/ps2.png",
-    "treatment": "Original hardware composited on the FLUX general background."
-  },
-  {
-    "file": "backgrounds/neogeo.png",
-    "source": "https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/c4876264bbacad363a6f1717bf9c1feeaefafd38/art/consoles/neogeo.png",
-    "treatment": "Original hardware composited on the FLUX general background."
-  },
-  {
     "file": "ui/ui_romm.png",
     "source": "assets/aurora/ui_icons/ui_romm.png",
     "upstream": "https://github.com/rommapp/romm/tree/master/frontend/assets",

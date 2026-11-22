@@ -52,7 +52,7 @@ La Biblioteca ofrece tres maneras de explorar cada plataforma: grilla, lista con
 
 El código se usa una sola vez. No compartas el archivo de configuración de la app: contiene el token de acceso recibido. Para descargas pausadas, presioná `X` para reanudar o `Cuadrado` para quitarlas de la cola.
 
-Los ajustes se ordenan en **Integraciones**, **Descargas** y **Acerca de**. En **Acerca de** puedes consultar la versión, el espacio libre y las rutas de almacenamiento; si RomM está conectado, también verás el servidor, la cantidad de juegos de su catálogo y la última sincronización. Si aún no hay un catálogo sincronizado para ese servidor, se indica sin mostrar datos de otro servidor.
+Los ajustes se ordenan en **Integraciones**, **Descargas**, **Apariencia** y **Acerca de**. En **Apariencia**, elige uno de los cuatro fondos con la cruceta y `X`, o toca su miniatura. **Fondo animado** activa o desactiva el movimiento sutil; ambos ajustes se guardan automáticamente. En **Acerca de** puedes consultar la versión, el espacio libre y las rutas de almacenamiento; si RomM está conectado, también verás el servidor, la cantidad de juegos de su catálogo y la última sincronización. Si aún no hay un catálogo sincronizado para ese servidor, se indica sin mostrar datos de otro servidor.
 
 ## English
 
@@ -74,7 +74,7 @@ Los ajustes se ordenan en **Integraciones**, **Descargas** y **Acerca de**. En *
 
 The code is one-time use. Do not share the app configuration file: it contains the access token received. For paused downloads, press `X` to resume or `Square` to remove them from the queue.
 
-Settings are ordered as **Integrations**, **Downloads**, and **About**. **About** shows the version, free space, and storage paths; when RomM is connected, it also shows the server, its catalog game count, and the last synchronization. A server without a synchronized catalog is identified explicitly rather than showing another server's data.
+Settings are ordered as **Integrations**, **Downloads**, **Appearance**, and **About**. In **Appearance**, choose one of four wallpapers with the directional pad and `X`, or tap its thumbnail. **Animated wallpaper** toggles subtle movement; both preferences save automatically. **About** shows the version, free space, and storage paths; when RomM is connected, it also shows the server, its catalog game count, and the last synchronization. A server without a synchronized catalog is identified explicitly rather than showing another server's data.
 
 ## Development
 

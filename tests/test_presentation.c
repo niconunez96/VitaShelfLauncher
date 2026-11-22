@@ -1,5 +1,6 @@
 #include "ui_presentation.h"
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -49,15 +50,50 @@ int main(void) {
         assert(vp_ui_touch_list_slot(r.x,r.y)==(int)i);
         assert(vp_ui_touch_list_slot(r.x+r.w,r.y)==-1);
     }
-    assert(VP_SETTINGS_INTEGRATIONS==0 && VP_SETTINGS_DOWNLOADS==1 && VP_SETTINGS_ABOUT==2);
-    assert(VP_SETTINGS_COUNT==3);
+    assert(VP_SETTINGS_INTEGRATIONS==0 && VP_SETTINGS_DOWNLOADS==1 && VP_SETTINGS_ABOUT==3);
+    assert(VP_SETTINGS_COUNT==4);
     for (i=0;i<VP_SETTINGS_COUNT;i++) {
         VpUiRect r=vp_ui_settings_row(i);
         assert(vp_ui_touch_settings_slot(r.x,r.y)==(int)i);
         assert(vp_ui_touch_settings_slot(r.x+r.w-1,r.y+r.h-1)==(int)i);
         assert(vp_ui_touch_settings_slot(r.x+r.w,r.y)==-1);
     }
-    assert(vp_ui_touch_settings_slot(310,288)==-1);
+    assert(vp_ui_touch_settings_slot(310,348)==-1);
+    for (i=0;i<=VP_UI_WALLPAPER_COUNT;i++) {
+        VpUiRect r=i==VP_UI_WALLPAPER_COUNT?vp_ui_wallpaper_motion_row():vp_ui_wallpaper_tile(i);
+        assert(r.x>=310 && r.x+r.w<=910 && r.y>=100 && r.y+r.h<=490);
+        assert(vp_ui_touch_appearance_slot(r.x,r.y)==(int)i);
+        assert(vp_ui_touch_appearance_slot(r.x+r.w-1,r.y+r.h-1)==(int)i);
+        assert(vp_ui_touch_appearance_slot(r.x+r.w,r.y)==-1);
+        assert(vp_ui_touch_appearance_slot(r.x,r.y+r.h)==-1);
+    }
+    {
+        VpUiPreferences preferences=VP_UI_PREFERENCES_DEFAULT;
+        assert(preferences.wallpaper==0 && preferences.animated);
+        assert(!strcmp(vp_ui_wallpaper(-1)->id,"dark-blue"));
+        assert(!strcmp(vp_ui_wallpaper(4)->id,"dark-blue"));
+        for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) {
+            assert(vp_ui_preferences_set(&preferences,"ui_wallpaper",vp_ui_wallpaper((int)i)->id));
+            assert(preferences.wallpaper==(int)i);
+        }
+        assert(!vp_ui_preferences_set(&preferences,"ui_wallpaper","../../other"));
+        assert(preferences.wallpaper==3);
+        assert(vp_ui_preferences_set(&preferences,"ui_wallpaper_animated","0") && !preferences.animated);
+        assert(!vp_ui_preferences_set(&preferences,"ui_wallpaper_animated","2") && !preferences.animated);
+        assert(!vp_ui_preferences_set(&preferences,"unrelated","1"));
+        assert(vp_ui_preferences_set(&preferences,"ui_wallpaper_animated","1") && preferences.animated);
+    }
+    for (i=0;i<=180000;i+=17) {
+        unsigned long long now=(unsigned long long)i*1000;
+        VpUiBackdropTransform t=vp_ui_backdrop_transform(now,true),still=vp_ui_backdrop_transform(now,false);
+        assert(t.scale>=1.019f && t.scale<=1.031f);
+        assert(t.x<=0 && t.y<=0 && t.x+960*t.scale>=960 && t.y+544*t.scale>=544);
+        assert(still.x==0 && still.y==0 && still.scale==1);
+    }
+    {
+        VpUiBackdropTransform a=vp_ui_backdrop_transform(179999999,true),b=vp_ui_backdrop_transform(180000000,true);
+        assert(fabsf(a.x-b.x)<.001f && fabsf(a.y-b.y)<.001f && fabsf(a.scale-b.scale)<.001f);
+    }
     {
         VpUiRect r=vp_ui_settings_content_card();
         assert(r.x==310 && r.y==148 && r.w==600 && r.h==270);

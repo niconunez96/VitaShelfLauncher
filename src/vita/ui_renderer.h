@@ -19,6 +19,7 @@ typedef struct {
     size_t download_selection;
     int settings_section, settings_field;
     bool settings_detail, settings_romm;
+    VpUiPreferences preferences;
     const char *app_version;
     bool romm_catalog_available;
     char romm_last_sync[32];

@@ -24,7 +24,8 @@ static Asset assets[]={
     A("header_dreamcast"),A("header_n3ds"),A("header_gamecube"),A("header_ps2"),A("header_wii"),
     A("ui_library"),A("ui_store"),A("ui_settings"),A("ui_download"),A("ui_check"),A("ui_star"),
     A("ui_home"),A("ui_key"),A("ui_sync"),A("ui_folder"),A("ui_general"),A("ui_interface"),
-    A("ui_storage"),A("ui_info"),A("ui_server"),A("ui_psx"),A("ui_romm"),A("ui_buttons")
+    A("ui_storage"),A("ui_info"),A("ui_server"),A("ui_psx"),A("ui_romm"),A("ui_buttons"),
+    A("wallpaper_dark-blue"),A("wallpaper_silver"),A("wallpaper_violet"),A("wallpaper_blue-waves")
 };
 #undef A
 static unsigned int bg,surface,ink,muted,accent;
@@ -81,13 +82,13 @@ static vita2d_texture *asset(const char *name) {
         if (strcmp(name,a->name)) continue;
         if (!a->attempted && asset_budget>0) {
             char path[160]; unsigned char header[29]={0}; SceUID fd;
-            bool heading=!strncmp(name,"header_",7);
-            unsigned int w=!strcmp(name,"console_surface")?136:
+            bool heading=!strncmp(name,"header_",7),wallpaper=!strncmp(name,"wallpaper_",10);
+            unsigned int w=wallpaper?240:(!strcmp(name,"console_surface")?136:
                 (!strncmp(name,"platform_",9) || !strcmp(name,"ui_buttons")?128:
-                (!strcmp(name,"focus") || !strcmp(name,"console_focus")?96:64));
-            unsigned int h=!strcmp(name,"console_surface")?170:w;
+                (!strcmp(name,"focus") || !strcmp(name,"console_focus")?96:64)));
+            unsigned int h=wallpaper?136:(!strcmp(name,"console_surface")?170:w);
             a->attempted=true; --asset_budget;
-            (void)snprintf(path,sizeof(path),"app0:assets/blueglass/%s/%s.png",heading?"headers":(!strncmp(name,"platform_",9)?"logos":"ui"),name);
+            (void)snprintf(path,sizeof(path),"app0:assets/blueglass/%s/%s.png",wallpaper?"wallpapers":(heading?"headers":(!strncmp(name,"platform_",9)?"logos":"ui")),name);
             fd=sceIoOpen(path,SCE_O_RDONLY,0);
             if (fd>=0) {
                 int count=sceIoRead(fd,header,sizeof(header));
@@ -203,13 +204,14 @@ void vp_ui_prepare(const VpUiFrame *f) {
         start=vp_ui_console_start(f->app->selected_platform,f->group_count);
         for (i=start;i<f->group_count && i<start+VP_UI_CONSOLE_PAGE;i++) (void)asset(vp_ui_platform(f->groups[i].platform)->asset);
     } else if (f->app->active_screen==VP_SCREEN_SETTINGS) {
-        const char *icons[]={"ui_server","ui_download","ui_romm","ui_info","ui_home","ui_key","ui_sync","ui_folder"};
+        const char *icons[]={"ui_server","ui_download","ui_romm","ui_info","ui_home","ui_key","ui_sync","ui_folder","ui_interface"};
         for (i=0;i<sizeof(icons)/sizeof(icons[0]);i++) (void)asset(icons[i]);
+        if (f->settings_detail && f->settings_section==VP_SETTINGS_APPEARANCE)
+            for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) (void)asset(vp_ui_wallpaper((int)i)->thumbnail);
     }
     if (heading_asset(f)) (void)asset(heading_asset(f));
     asset_budget=0;
-    vp_ui_backdrop_prepare(f->app->active_screen==VP_SCREEN_LIBRARY && f->app->library_level==VP_LEVEL_PLATFORMS?
-        platform_asset(f):NULL,sceKernelGetProcessTimeWide());
+    vp_ui_backdrop_prepare(f->preferences.wallpaper,sceKernelGetProcessTimeWide());
 }
 
 static void backdrop(const VpUiFrame *f,unsigned long long now) {
@@ -220,7 +222,8 @@ static void backdrop(const VpUiFrame *f,unsigned long long now) {
         vita2d_draw_rectangle(0,y,960,8,mix(bg,C(176,200,246,255),t));
     }
     vp_ui_backdrop_draw(now,appearance.motion_ms,(unsigned int)appearance.wallpaper_alpha,
-        f->app->active_screen==VP_SCREEN_LIBRARY && f->app->library_level==VP_LEVEL_ROMS);
+        f->preferences.animated);
+    if (f->preferences.wallpaper==1) vita2d_draw_rectangle(0,0,960,544,C(10,24,51,95));
     if (!settings && f->app->library_level==VP_LEVEL_ROMS && f->background && f->app->active_view!=VP_VIEW_GRID)
         fit(f->background,370,58,590,380,C(255,255,255,125));
     if (!settings) {
@@ -398,8 +401,8 @@ static void settings_empty(const VpUiFrame *f,const char *symbol,const char *tit
 }
 
 static void settings(const VpUiFrame *f) {
-    static const char *names[]={"Integraciones","Descargas","Acerca de"};
-    static const char *icons[]={"ui_server","ui_download","ui_info"};
+    static const char *names[]={"Integraciones","Descargas","Apariencia","Acerca de"};
+    static const char *icons[]={"ui_server","ui_download","ui_interface","ui_info"};
     int i,section=f->settings_section;
     icon("ui_settings",44,199,54);
     text(f,VP_TYPE_PAGE_TITLE,104,239,200,ink,"Ajustes");
@@ -411,6 +414,24 @@ static void settings(const VpUiFrame *f) {
             text(f,VP_TYPE_SETTINGS_ROW,r.x+80,r.y+32,r.w-116,ink,names[i]);
             vita2d_draw_line(r.x+r.w-28,r.y+18,r.x+r.w-21,r.y+25,ink);
             vita2d_draw_line(r.x+r.w-21,r.y+25,r.x+r.w-28,r.y+32,ink);
+        }
+        return;
+    }
+    if (section==VP_SETTINGS_APPEARANCE) {
+        for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) {
+            VpUiRect r=vp_ui_wallpaper_tile((size_t)i);
+            const VpUiWallpaper *wallpaper=vp_ui_wallpaper(i);
+            glass(r,f->settings_field==i,false);
+            fit(asset(wallpaper->thumbnail),r.x+23,r.y+6,240,136,C(255,255,255,255));
+            round_rect(r.x+8,r.y+126,r.w-16,28,8,C(15,30,61,230));
+            text(f,VP_TYPE_DESCRIPTION,r.x+18,r.y+146,r.w-66,ink,wallpaper->label);
+            if (f->preferences.wallpaper==i) icon("ui_check",r.x+r.w-40,r.y+128,24);
+        }
+        {
+            VpUiRect r=vp_ui_wallpaper_motion_row();
+            glass(r,f->settings_field==VP_UI_WALLPAPER_COUNT,false);
+            text(f,VP_TYPE_DESCRIPTION,r.x+16,r.y+25,400,ink,"Fondo animado");
+            text(f,VP_TYPE_DESCRIPTION,r.x+440,r.y+25,130,ink,f->preferences.animated?"Activado":"Desactivado");
         }
         return;
     }
@@ -526,6 +547,8 @@ static void footer(const VpUiFrame *f) {
         else if (item->source==VP_SOURCE_HOMEBREW) action="Instalar";
     }
     if (downloads) action="Cancelar / Reintentar";
+    if (f->app->active_screen==VP_SCREEN_SETTINGS && f->settings_detail && f->settings_section==VP_SETTINGS_APPEARANCE)
+        action=f->settings_field==VP_UI_WALLPAPER_COUNT?"Activar / Desactivar":"Aplicar fondo";
     if (f->app->active_screen==VP_SCREEN_SETTINGS && !f->settings_detail) action="Seleccionar";
     button(0,366,513); text(f,VP_TYPE_FOOTER,383,518,210,C(12,32,76,255),action);
     button(1,613,513); text(f,VP_TYPE_FOOTER,630,518,64,C(12,32,76,255),"Volver");

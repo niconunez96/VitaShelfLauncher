@@ -213,7 +213,7 @@ int main(int argc,char **argv) {
     const char *slugs[]={"arcade","dreamcast","gba","nds","gamecube","psx","psp","3ds","ps2","snes","genesis","wii"};
     const char *titles[]={"Bloody Roar II","Castlevania: Symphony of the Night","Crash Bandicoot","Gran Turismo","Metal Gear Solid",
         "Resident Evil","Silent Hill","Dino Crisis","Tomb Raider","Ridge Racer","A game with a very long title and accents: aventura fantástica","Another game"};
-    const char *cases[]={"platforms","carousel","list","grid","settings","integrations","downloads","downloads-empty","romm","about","about-disconnected","about-never-synced","store","empty","last-page","platforms-arcade","platforms-gba","platforms-last"};
+    const char *cases[]={"platforms","carousel","list","grid","settings","integrations","downloads","downloads-empty","romm","about","about-disconnected","about-never-synced","store","empty","last-page","platforms-arcade","platforms-gba","platforms-last","appearance-dark","appearance-silver","appearance-violet","appearance-waves"};
     size_t c,i;
     cr=cairo_create(canvas); assert(!FT_Init_FreeType(&freetype)); assert(vp_ui_fonts_load(&typefaces));
     assert(vp_ui_backdrop_init());
@@ -238,6 +238,7 @@ int main(int argc,char **argv) {
     frame.app=&app; frame.font=&typefaces; frame.groups=groups; frame.group_count=12;
     frame.visible=visible; frame.visible_count=12; frame.downloads=&queue;
     frame.active_theme="default"; frame.romm_url="https://romm.example.test"; frame.pair_code="";
+    frame.preferences=(VpUiPreferences)VP_UI_PREFERENCES_DEFAULT;
     frame.app_version="01.00"; frame.romm_catalog_available=true;
     (void)snprintf(frame.romm_last_sync,sizeof(frame.romm_last_sync),"21/11/2026 18:24");
     frame.storage_free=12ULL*1073741824; frame.storage_total=32ULL*1073741824;
@@ -275,6 +276,11 @@ int main(int argc,char **argv) {
         if (c==13) frame.group_count=0;
         if (c==14) { app.library_level=VP_LEVEL_ROMS; app.active_view=VP_VIEW_GRID; app.selected_item=11; }
         if (c>=15) app.selected_platform=c==15?0:(c==16?2:11);
+        if (c>=18) {
+            app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=true;
+            frame.settings_section=VP_SETTINGS_APPEARANCE; frame.settings_field=(int)c-18;
+            frame.preferences.wallpaper=(int)c-18; frame.preferences.animated=c!=21;
+        }
         (void)snprintf(app.active_platform,sizeof(app.active_platform),"psx");
         frame.romm_state=c==10?VP_ROMM_UNCONFIGURED:VP_ROMM_CONNECTED;
         for (i=0;i<10;i++) frame.covers[i]=covers[i];
@@ -288,6 +294,11 @@ int main(int argc,char **argv) {
         if (c==5) assert(strstr(frame_text,"RomM\n") && !strstr(frame_text,"Pair code\n"));
         if (c==8) assert(strstr(frame_text,"URL del servidor\n") && strstr(frame_text,"Pair code\n") && strstr(frame_text,"Guardar\n"));
         if (c==7) assert(strstr(frame_text,"Todo al día\n"));
+        if (c>=18) {
+            for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) assert(strstr(frame_text,vp_ui_wallpaper((int)i)->label));
+            assert(strstr(frame_text,"Fondo animado\n"));
+            assert(strstr(frame_text,c==21?"Desactivado\n":"Activado\n"));
+        }
         if (c>=9 && c<=11) {
             assert(strstr(frame_text,"VitaShelf Launcher · 01.00\n"));
             assert(strstr(frame_text,"Libre: 12.0 GiB / 32.0 GiB\n"));
@@ -319,6 +330,6 @@ int main(int argc,char **argv) {
     vp_ui_fonts_free(&typefaces);
     assert(!textures && !fonts && drawn>0);
     cairo_destroy(cr); cairo_surface_destroy(canvas); FT_Done_FreeType(freetype);
-    puts("Blueglass renderer: 18 states, opaque console bodies, border-only focus, partial/missing assets, Inter metrics and cleanup passed");
+    puts("Blueglass renderer: 22 states, four wallpapers, opaque console bodies, border-only focus, partial/missing assets, Inter metrics and cleanup passed");
     return 0;
 }

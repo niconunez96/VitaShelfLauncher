@@ -7,9 +7,15 @@
 typedef struct { int x, y, w, h; } VpUiRect;
 typedef struct { const char *asset; uint32_t rgb; } VpUiPlatform;
 typedef struct { int motion_ms, radius, wallpaper_alpha; } VpUiAppearance;
+typedef struct { int wallpaper; bool animated; } VpUiPreferences;
+typedef struct { const char *id, *label, *thumbnail; } VpUiWallpaper;
+typedef struct { float x, y, scale; } VpUiBackdropTransform;
+#define VP_UI_WALLPAPER_COUNT 4
+#define VP_UI_PREFERENCES_DEFAULT {0, true}
 typedef enum {
     VP_SETTINGS_INTEGRATIONS,
     VP_SETTINGS_DOWNLOADS,
+    VP_SETTINGS_APPEARANCE,
     VP_SETTINGS_ABOUT,
     VP_SETTINGS_COUNT
 } VpSettingsSection;
@@ -25,6 +31,12 @@ VpUiRect vp_ui_list_row(size_t slot);
 VpUiRect vp_ui_carousel_tile(int offset);
 VpUiRect vp_ui_settings_row(size_t slot);
 VpUiRect vp_ui_settings_content_card(void);
+VpUiRect vp_ui_wallpaper_tile(size_t slot);
+VpUiRect vp_ui_wallpaper_motion_row(void);
+int vp_ui_touch_appearance_slot(int x, int y);
+const VpUiWallpaper *vp_ui_wallpaper(int index);
+bool vp_ui_preferences_set(VpUiPreferences *preferences, const char *key, const char *value);
+VpUiBackdropTransform vp_ui_backdrop_transform(unsigned long long now, bool animated);
 int vp_ui_touch_console_slot(int x, int y);
 int vp_ui_touch_carousel_offset(int x, int y);
 int vp_ui_touch_settings_slot(int x, int y);

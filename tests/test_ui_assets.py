@@ -23,15 +23,31 @@ class ArtworkInventoryTests(unittest.TestCase):
             self.assertEqual(data[25], 6, name)
             self.check_png(ASSETS / "headers" / f"{name}.png", (width,height), 64*1024)
 
-    def test_every_logo_has_a_packaged_native_background(self):
+    def test_every_logo_is_packaged_at_native_size(self):
         cmake = (ROOT / "CMakeLists.txt").read_text()
         names = re.search(r"set\(VP_BLUEGLASS_LOGOS\s+(.*?)\)",cmake,re.S).group(1).split()
         self.assertEqual(len(names),25)
         self.assertEqual({p.stem for p in (ASSETS / "logos").glob("*.png")},set(names))
         for name in names:
             self.check_png(ASSETS / "logos" / f"{name}.png",(128,128),512*1024)
-            self.check_png(ASSETS / "backgrounds" / f"{name.removeprefix('platform_')}.png",(960,544),2*1024*1024)
-        self.check_png(ASSETS / "backgrounds/general.png",(960,544),2*1024*1024)
+
+    def test_four_wallpapers_and_thumbnails_replace_legacy_backgrounds(self):
+        cmake = (ROOT / "CMakeLists.txt").read_text()
+        names = re.search(r"set\(VP_WALLPAPERS\s+(.*?)\)",cmake,re.S).group(1).split()
+        self.assertEqual(names,["dark-blue","silver","violet","blue-waves"])
+        expected = {f"{prefix}{name}.png" for name in names for prefix in ("","wallpaper_")}
+        self.assertEqual({p.name for p in (ASSETS / "wallpapers").glob("*.png")},expected)
+        self.assertNotIn("assets/blueglass/backgrounds/",cmake)
+        self.assertFalse(list((ASSETS / "backgrounds").glob("*.png")))
+        for name in names:
+            self.check_png(ASSETS / "wallpapers" / f"{name}.png",(960,544),2*1024*1024)
+            self.check_png(ASSETS / "wallpapers" / f"wallpaper_{name}.png",(240,136),512*1024)
+        provenance=json.loads((ASSETS / "wallpapers/provenance.json").read_text())
+        self.assertEqual(len(provenance),4)
+        for entry in provenance:
+            self.assertRegex(entry["sha256_source"],r"^[0-9a-f]{64}$")
+            self.assertTrue((ASSETS / entry["file"]).is_file())
+            self.assertTrue((ASSETS / entry["thumbnail"]).is_file())
 
     def test_graphic_symbols_and_inter_weights_are_explicitly_bundled(self):
         cmake = (ROOT / "CMakeLists.txt").read_text()

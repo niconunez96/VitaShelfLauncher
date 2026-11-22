@@ -2,6 +2,7 @@
 #include "ui_presentation.h"
 #include <ctype.h>
 #include <errno.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -97,6 +98,55 @@ VpUiRect vp_ui_settings_content_card(void) {
 
 static bool inside(VpUiRect r, int x, int y) {
     return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h;
+}
+
+const VpUiWallpaper *vp_ui_wallpaper(int index) {
+    static const VpUiWallpaper wallpapers[VP_UI_WALLPAPER_COUNT] = {
+        {"dark-blue", "Azul oscuro", "wallpaper_dark-blue"},
+        {"silver", "Plateado", "wallpaper_silver"},
+        {"violet", "Violeta", "wallpaper_violet"},
+        {"blue-waves", "Ondas azules", "wallpaper_blue-waves"}
+    };
+    return &wallpapers[index>=0 && index<VP_UI_WALLPAPER_COUNT?index:0];
+}
+
+bool vp_ui_preferences_set(VpUiPreferences *preferences, const char *key, const char *value) {
+    int i;
+    if (!strcmp(key,"ui_wallpaper")) {
+        for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) {
+            if (!strcmp(value,vp_ui_wallpaper(i)->id)) { preferences->wallpaper=i; return true; }
+        }
+    } else if (!strcmp(key,"ui_wallpaper_animated") && (!strcmp(value,"0") || !strcmp(value,"1"))) {
+        preferences->animated=value[0]=='1';
+        return true;
+    }
+    return false;
+}
+
+VpUiRect vp_ui_wallpaper_tile(size_t slot) {
+    VpUiRect r={310+(int)(slot%2)*300,104+(int)(slot/2)*174,286,160};
+    return r;
+}
+
+VpUiRect vp_ui_wallpaper_motion_row(void) {
+    VpUiRect r={310,450,586,38};
+    return r;
+}
+
+int vp_ui_touch_appearance_slot(int x, int y) {
+    size_t i;
+    for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) if (inside(vp_ui_wallpaper_tile(i),x,y)) return (int)i;
+    return inside(vp_ui_wallpaper_motion_row(),x,y)?VP_UI_WALLPAPER_COUNT:-1;
+}
+
+VpUiBackdropTransform vp_ui_backdrop_transform(unsigned long long now, bool animated) {
+    VpUiBackdropTransform transform={0,0,1};
+    float seconds=(float)(now%180000000ULL)/1000000.f;
+    if (!animated) return transform;
+    transform.scale=1.025f+.005f*sinf(seconds*6.2831853f/90.f);
+    transform.x=960.f*(1-transform.scale)/2+4*sinf(seconds*6.2831853f/60.f);
+    transform.y=544.f*(1-transform.scale)/2+2*cosf(seconds*6.2831853f/90.f);
+    return transform;
 }
 
 size_t vp_ui_console_start(size_t selected, size_t total) {

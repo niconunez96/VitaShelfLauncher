@@ -56,9 +56,12 @@ if(DEFINED ENV{VITASDK})
     string(REPLACE "platform_" "header_" header "${asset}")
     list(APPEND VP_BLUEGLASS_FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/headers/${header}.png" "assets/blueglass/headers/${header}.png")
-    string(REPLACE "platform_" "" system "${asset}")
+  endforeach()
+  set(VP_WALLPAPERS dark-blue silver violet blue-waves)
+  foreach(wallpaper IN LISTS VP_WALLPAPERS)
     list(APPEND VP_BLUEGLASS_FILES
-      "${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/backgrounds/${system}.png" "assets/blueglass/backgrounds/${system}.png")
+      "${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/wallpapers/${wallpaper}.png" "assets/blueglass/wallpapers/${wallpaper}.png"
+      "${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/wallpapers/wallpaper_${wallpaper}.png" "assets/blueglass/wallpapers/wallpaper_${wallpaper}.png")
   endforeach()
   foreach(asset IN LISTS VP_BLUEGLASS_UI)
     list(APPEND VP_BLUEGLASS_FILES
@@ -73,7 +76,7 @@ if(DEFINED ENV{VITASDK})
      NAME ${VITA_APP_NAME}
      FILE ${CMAKE_CURRENT_SOURCE_DIR}/themes/default/theme.ini assets/default/theme.ini
             ${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf openssl.cnf
-             ${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/backgrounds/general.png assets/blueglass/backgrounds/general.png
+              ${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/wallpapers/provenance.json assets/licenses/Wallpaper-provenance.json
              ${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/fonts/OFL.txt assets/blueglass/fonts/OFL.txt
              ${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/sources/Carbon-README.txt assets/licenses/Carbon-README.txt
               ${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/NOTICE.md assets/licenses/Blueglass-NOTICE.md

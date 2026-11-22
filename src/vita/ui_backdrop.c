@@ -1,4 +1,5 @@
 #include "ui_backdrop.h"
+#include "ui_presentation.h"
 #ifndef VP_UI_TESTING
 #include "vita_thread_priority.h"
 #endif
@@ -14,13 +15,13 @@ typedef struct {
     pthread_t thread;
     pthread_mutex_t mutex;
     pthread_cond_t condition;
-    bool running,pending,ready;
+    bool running,pending,ready,busy;
     char request[48],result[48];
     unsigned char *pixels;
 } WallpaperWorker;
 static WallpaperWorker worker={.mutex=PTHREAD_MUTEX_INITIALIZER,.condition=PTHREAD_COND_INITIALIZER};
-static vita2d_texture *general,*current,*previous;
-static char desired[48],loaded[48],submitted[48],failed[48];
+static vita2d_texture *current,*previous;
+static char desired[48],loaded[48],failed[48];
 static unsigned long long changed_at,fade_at;
 static bool started;
 
@@ -30,7 +31,7 @@ static unsigned char *decode(const char *name) {
     unsigned char *pixels;
     FILE *file;
     long size;
-    (void)snprintf(path,sizeof(path),"%sassets/blueglass/backgrounds/%s.png",
+    (void)snprintf(path,sizeof(path),"%sassets/blueglass/wallpapers/%s.png",
 #ifdef VP_UI_TESTING
         "",
 #else
@@ -95,21 +96,23 @@ static vita2d_texture *upload(unsigned char *pixels) {
     return texture;
 }
 
-void vp_ui_backdrop_prepare(const char *asset,unsigned long long now) {
-    const char *name=asset && !strncmp(asset,"platform_",9)?asset+9:"general";
+void vp_ui_backdrop_prepare(int wallpaper,unsigned long long now) {
+    const char *name=vp_ui_wallpaper(wallpaper)->id;
     if (!started) return;
-    if (strcmp(desired,name)) { (void)snprintf(desired,sizeof(desired),"%s",name); changed_at=now; }
+    if (strcmp(desired,name)) {
+        (void)snprintf(desired,sizeof(desired),"%s",name); changed_at=now;
+        failed[0]='\0';
+    }
     if (previous && now-fade_at>=220000) { vita2d_free_texture(previous); previous=NULL; }
     pthread_mutex_lock(&worker.mutex);
     if (worker.ready) {
         unsigned char *pixels=worker.pixels;
         char result[48];
         (void)snprintf(result,sizeof(result),"%s",worker.result);
-        worker.pixels=NULL; worker.ready=false;
+        worker.pixels=NULL; worker.ready=false; worker.busy=false;
         pthread_cond_signal(&worker.condition);
         pthread_mutex_unlock(&worker.mutex);
-        if (!strcmp(result,"general")) general=upload(pixels);
-        else if (!strcmp(result,desired)) {
+        if (!strcmp(result,desired)) {
             vita2d_texture *texture=upload(pixels);
             if (texture) {
                 if (previous) vita2d_free_texture(previous);
@@ -122,29 +125,22 @@ void vp_ui_backdrop_prepare(const char *asset,unsigned long long now) {
         free(pixels);
         return;
     }
-    if (!worker.pending && ((!general && strcmp(submitted,"general")) ||
-        (general && now-changed_at>=120000 && strcmp(desired,"general") && strcmp(desired,loaded) && strcmp(desired,submitted) && strcmp(desired,failed)))) {
-        const char *request=general?desired:"general";
-        (void)snprintf(worker.request,sizeof(worker.request),"%s",request);
-        (void)snprintf(submitted,sizeof(submitted),"%s",request);
-        worker.pending=true;
+    if (!worker.busy && (!current || now-changed_at>=120000) && strcmp(desired,loaded) && strcmp(desired,failed)) {
+        (void)snprintf(worker.request,sizeof(worker.request),"%s",desired);
+        worker.pending=true; worker.busy=true;
         pthread_cond_signal(&worker.condition);
     }
     pthread_mutex_unlock(&worker.mutex);
 }
 
-void vp_ui_backdrop_draw(unsigned long long now,int motion_ms,unsigned int opacity,bool plain) {
-    bool console=strcmp(desired,"general")!=0 && strcmp(desired,failed)!=0 && current;
+void vp_ui_backdrop_draw(unsigned long long now,int motion_ms,unsigned int opacity,bool animated) {
+    VpUiBackdropTransform t=vp_ui_backdrop_transform(now,animated);
     int duration=motion_ms>220?220:motion_ms;
     float progress=duration?(float)(now-fade_at)/(duration*1000.f):1.f;
     if (progress>1) progress=1;
-    if (general) {
-        if (plain) vita2d_draw_texture_tint_part_scale(general,0,0,0,0,650,544,960.f/650,1,0x00ffffffu|(opacity<<24));
-        else vita2d_draw_texture_tint_scale(general,0,0,1,1,0x00ffffffu|(opacity<<24));
-    }
-    if (console) {
-        if (previous && progress<1) vita2d_draw_texture_tint_scale(previous,0,0,1,1,0x00ffffffu|(opacity<<24));
-        vita2d_draw_texture_tint_scale(current,0,0,1,1,0x00ffffffu|((unsigned int)(opacity*progress)<<24));
+    if (current) {
+        if (previous && progress<1) vita2d_draw_texture_tint_scale(previous,t.x,t.y,t.scale,t.scale,0x00ffffffu|(opacity<<24));
+        vita2d_draw_texture_tint_scale(current,t.x,t.y,t.scale,t.scale,0x00ffffffu|((unsigned int)(opacity*progress)<<24));
     }
 }
 
@@ -154,10 +150,9 @@ void vp_ui_backdrop_shutdown(void) {
         pthread_cond_signal(&worker.condition); pthread_mutex_unlock(&worker.mutex);
         pthread_join(worker.thread,NULL); started=false;
     }
-    free(worker.pixels); worker.pixels=NULL; worker.ready=worker.pending=false;
-    if (general) vita2d_free_texture(general);
+    free(worker.pixels); worker.pixels=NULL; worker.ready=worker.pending=worker.busy=false;
     if (current) vita2d_free_texture(current);
     if (previous) vita2d_free_texture(previous);
-    general=current=previous=NULL;
-    desired[0]=loaded[0]=submitted[0]=failed[0]='\0';
+    current=previous=NULL;
+    desired[0]=loaded[0]=failed[0]='\0';
 }

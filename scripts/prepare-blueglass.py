@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build Vita-sized UI resources from upstream vectors and FLUX downloads.
+"""Build Vita-sized UI resources from upstream vectors.
 
 Requires Pillow, fonttools[woff] and CairoSVG. Network requests only fetch the
-explicit upstream font/logo inventory; FLUX generation is a separate operation.
+explicit upstream font/logo inventory; prepare-wallpapers.py handles wallpapers.
 """
 import argparse
 import hashlib
@@ -159,7 +159,7 @@ def console_assets():
 
 
 def static_assets():
-    for folder in ("fonts", "logos", "ui", "backgrounds", "sources"):
+    for folder in ("fonts", "logos", "ui", "sources"):
         (OUT / folder).mkdir(parents=True, exist_ok=True)
     provenance = []
     for weight in ("Regular", "Medium", "SemiBold", "Bold"):
@@ -222,47 +222,6 @@ def static_assets():
     (OUT / "provenance.json").write_text(json.dumps(provenance, indent=2)+"\n")
     controls_assets()
     console_assets()
-
-
-def background(name, source):
-    image = Image.open(io.BytesIO(fetch(source)) if source.startswith("https://") else source).convert("RGB")
-    image = ImageOps.fit(image, (960, 544), method=Image.Resampling.LANCZOS)
-    image.save(OUT / "backgrounds" / f"{name}.png", optimize=True)
-
-
-def finish_assets():
-    # Contrast adaptation only: original vector contours and brand colors remain.
-    for path in (OUT / "logos").glob("*.png"):
-        logo = Image.open(path).convert("RGBA")
-        logo.putdata([(245, 248, 255, a) if max(r,g,b)<85 else (r,g,b,a)
-                      for r,g,b,a in logo.getdata()])
-        logo.save(path, optimize=True)
-    base = Image.open(OUT / "backgrounds/general.png").convert("RGBA")
-    provenance = json.loads((OUT / "provenance.json").read_text())
-    revision = provenance[4]["source"].split("/")[5]
-    systems = {"psx":"psx", "nes":"nes", "wonderswan":"wonderswan", "dreamcast":"dreamcast",
-               "n3ds":"3ds", "gamecube":"gc", "ps2":"ps2", "neogeo":"neogeo"}
-    provenance = [entry for entry in provenance if not entry["file"].startswith("backgrounds/")]
-    for system, upstream in systems.items():
-        url = f"https://raw.githubusercontent.com/fabricecaruso/es-theme-carbon/{revision}/art/consoles/{upstream}.png"
-        data = fetch(url)
-        (OUT / "sources" / f"{system}-console.png").write_bytes(data)
-        console = Image.open(io.BytesIO(data)).convert("RGBA")
-        if console.getbbox():
-            console = console.crop(console.getbbox())
-        console = ImageOps.contain(console, (670,390), Image.Resampling.LANCZOS)
-        composed = base.crop((0,0,650,544)).resize((960,544),Image.Resampling.LANCZOS)
-        composed.alpha_composite(console, (960-console.width+20, 70))
-        composed.convert("RGB").save(OUT / "backgrounds" / f"{system}.png", optimize=True)
-        provenance.append({"file": f"backgrounds/{system}.png", "source": url,
-                           "treatment": "Original hardware composited on the FLUX general background."})
-    for system in ("generic", "homebrew"):
-        composed = base.copy()
-        logo = Image.open(OUT / "logos" / f"platform_{system}.png").convert("RGBA")
-        logo = logo.resize((512,256), Image.Resampling.LANCZOS)
-        composed.alpha_composite(logo,(430,90))
-        composed.convert("RGB").save(OUT / "backgrounds" / f"{system}.png", optimize=True)
-    (OUT / "provenance.json").write_text(json.dumps(provenance,indent=2)+"\n")
 
 
 def compact_logos():
@@ -395,20 +354,14 @@ def preview_fixtures(directory):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--static", action="store_true")
-    parser.add_argument("--finish", action="store_true")
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--controls",action="store_true")
     parser.add_argument("--console-cards", action="store_true", help="Rebuild console material and border-only focus locally")
     parser.add_argument("--logo-service", metavar="URL", help="Rebuild console card/header logos using an imageproxy /image endpoint and retained sources")
-    parser.add_argument("--background", nargs=2, metavar=("NAME", "SOURCE"))
     parser.add_argument("--preview-fixtures",metavar="DIRECTORY")
     args = parser.parse_args()
     if args.static:
         static_assets()
-    if args.background:
-        background(*args.background)
-    if args.finish:
-        finish_assets()
     if args.preview_fixtures:
         preview_fixtures(args.preview_fixtures)
     if args.compact or args.static:

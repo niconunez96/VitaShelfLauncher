@@ -10,13 +10,15 @@
   Logos/trademarks belong to their respective owners. Changes: rasterization,
   transparent padding, white adaptation of dark monochrome details, resizing,
   stacking of original marks/lettering for cards (including GAME BOY / ADVANCE),
-  alpha-trimmed header variants, and composition of hardware illustrations on the generated wallpaper. Adapted Carbon
+  alpha-trimmed header variants. Adapted Carbon
   artwork retains its upstream CC BY-NC-SA terms. Original SVGs and source console
   images are retained under `sources/`; exact revisions and URLs are in `provenance.json`.
-- **Wallpaper and generated hardware backgrounds**: original FLUX 3 Image generations
-  for VitaShelf Launcher. Durable generation IDs are recorded in `generations.json`; temporary
-  signed URLs are deliberately excluded. Moderated submissions were not retried;
-  their platform backgrounds use attributed source hardware on the FLUX wallpaper.
+- **Selectable wallpapers**: four images supplied by the project owner for this change
+  (dark blue, silver, violet, and blue waves), replacing the former generated backgrounds.
+  Upstream authorship and licensing were not specified; no ownership or new license is claimed.
+  PlayStation marks belong to their respective owners. Processing removes top-edge remnants,
+  crops without distortion, and resizes to 960×544 with 240×136 thumbnails.
+  Source hashes and crop bounds are recorded in `wallpapers/provenance.json` (also bundled).
 - **RomM settings icon**: the previously accepted circular PNG from
   `assets/aurora/ui_icons/ui_romm.png`, restored byte-for-byte without recoloring.
   The symbol belongs to the RomM project, https://github.com/rommapp/romm/tree/master/frontend/assets.

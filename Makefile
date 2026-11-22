@@ -27,7 +27,7 @@ test-vita-lifecycle:
 
 build/test_presentation: src/vita/ui_presentation.c src/vita/ui_presentation.h tests/test_presentation.c
 	@mkdir -p build
-	$(CC) $(CFLAGS) -Isrc/vita src/vita/ui_presentation.c tests/test_presentation.c -o $@
+	$(CC) $(CFLAGS) -Isrc/vita src/vita/ui_presentation.c tests/test_presentation.c -lm -o $@
 
 build/test_catalog_cache: src/vita/catalog_cache.c src/vita/catalog_cache.h include/vitashelflauncher.h tests/test_catalog_cache.c
 	@mkdir -p build

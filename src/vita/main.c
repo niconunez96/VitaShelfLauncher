@@ -55,6 +55,7 @@ static char romm_pair_code[VP_TEXT];
 static VpRommConnection romm_connection;
 static bool romm_check_pending;
 static int settings_section;
+static VpUiPreferences ui_preferences=VP_UI_PREFERENCES_DEFAULT;
 static int settings_field;
 static size_t download_selection;
 static bool settings_detail_active;
@@ -240,6 +241,8 @@ static void load_providers(VpApp *app) {
             (void)snprintf(homebrew_config.catalog_url, sizeof(homebrew_config.catalog_url), "%s", equals);
         else if (strcmp(line, "active_theme") == 0)
             (void)snprintf(active_theme, sizeof(active_theme), "%s", equals);
+        else if (strncmp(line, "ui_wallpaper", 12) == 0)
+            (void)vp_ui_preferences_set(&ui_preferences, line, equals);
         else if (strncmp(line, "launch_", 7) == 0)
             (void)vp_launch_config_set(&launch_config, line + 7, equals);
     }
@@ -256,17 +259,25 @@ static bool save_romm_config(void) {
     size_t index;
     (void)sceIoMkdir("ux0:data", 0777);
     (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
-    file = fopen(VP_CONFIG_PATH, "w");
+    file = fopen(VP_CONFIG_PATH ".tmp", "w");
     if (file == NULL) return false;
     (void)fprintf(file, "romm_url=%s\nromm_token=%s\nimage_proxy_url=%s\nhomebrew_catalog=%s\nactive_theme=%s\n",
                    romm_config.base_url, romm_config.token, romm_config.image_proxy_url,
-                   homebrew_config.catalog_url, active_theme);
+                    homebrew_config.catalog_url, active_theme);
+    (void)fprintf(file, "ui_wallpaper=%s\nui_wallpaper_animated=%d\n",
+                  vp_ui_wallpaper(ui_preferences.wallpaper)->id, ui_preferences.animated?1:0);
     for (index = 0; index < launch_config.count; index++) {
         const VpLaunchProfile *profile = &launch_config.profiles[index];
         (void)fprintf(file, "launch_%s=%s:%s\n", profile->platform, profile->titleid,
                       profile->core);
     }
-    return fclose(file) == 0;
+    {
+        bool failed=ferror(file)!=0;
+        if (fclose(file)!=0) failed=true;
+        if (!failed && rename(VP_CONFIG_PATH ".tmp",VP_CONFIG_PATH)==0) return true;
+        (void)remove(VP_CONFIG_PATH ".tmp");
+        return false;
+    }
 }
 
 static bool file_exists(const char *path) {
@@ -799,6 +810,7 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
         }
         if (pressed & SCE_CTRL_CROSS) {
             settings_detail_active = true;
+            settings_field = settings_section==VP_SETTINGS_APPEARANCE?ui_preferences.wallpaper:0;
             vp_ui_audio_play(VP_UI_SOUND_ENTER);
         }
         return;
@@ -807,6 +819,31 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
         if (settings_romm_active) settings_romm_active = false;
         else settings_detail_active = false;
         vp_ui_audio_play(VP_UI_SOUND_BACK);
+        return;
+    }
+    if (settings_section == VP_SETTINGS_APPEARANCE) {
+        if (pressed & SCE_CTRL_UP) {
+            settings_field=settings_field>=2?settings_field-2:VP_UI_WALLPAPER_COUNT;
+            vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+        }
+        if (pressed & SCE_CTRL_DOWN) {
+            settings_field=settings_field==VP_UI_WALLPAPER_COUNT?0:
+                (settings_field<2?settings_field+2:VP_UI_WALLPAPER_COUNT);
+            vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+        }
+        if (pressed & (SCE_CTRL_LEFT|SCE_CTRL_RIGHT) && settings_field<VP_UI_WALLPAPER_COUNT) {
+            settings_field^=1;
+            vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+        }
+        if (pressed & SCE_CTRL_CROSS) {
+            VpUiPreferences previous=ui_preferences;
+            if (settings_field==VP_UI_WALLPAPER_COUNT) ui_preferences.animated=!ui_preferences.animated;
+            else ui_preferences.wallpaper=settings_field;
+            if (!save_romm_config()) {
+                ui_preferences=previous;
+                show_notification(app,"No se pudo guardar la apariencia");
+            } else vp_ui_audio_play(VP_UI_SOUND_ENTER);
+        }
         return;
     }
     if (settings_section == VP_SETTINGS_DOWNLOADS) {
@@ -1431,6 +1468,7 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
     }
     frame->downloads = &download_queue; frame->download_selection = download_selection;
     frame->settings_section = settings_section; frame->settings_field = settings_field;
+    frame->preferences = ui_preferences;
     frame->settings_detail = settings_detail_active;
     frame->settings_romm = settings_romm_active;
     frame->app_version = VP_APP_VERSION;
@@ -1539,7 +1577,10 @@ static unsigned int touch_navigation_pressed(int x, int y) {
         if (slot>=0) { settings_section=slot; return SCE_CTRL_CROSS; }
         return 0;
     }
-    if (settings_section == VP_SETTINGS_INTEGRATIONS && !settings_romm_active) {
+    if (settings_section == VP_SETTINGS_APPEARANCE) {
+        slot=vp_ui_touch_appearance_slot(x,y);
+        if (slot>=0) { settings_field=slot; return SCE_CTRL_CROSS; }
+    } else if (settings_section == VP_SETTINGS_INTEGRATIONS && !settings_romm_active) {
         if (vp_ui_touch_settings_slot(x,y)==0) return SCE_CTRL_CROSS;
     } else if (settings_section == VP_SETTINGS_INTEGRATIONS) {
         for (slot = 0; slot < 4; slot++) {
