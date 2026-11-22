@@ -36,8 +36,10 @@ class ArtworkInventoryTests(unittest.TestCase):
     def test_graphic_symbols_and_inter_weights_are_explicitly_bundled(self):
         cmake = (ROOT / "CMakeLists.txt").read_text()
         names = re.search(r"set\(VP_BLUEGLASS_UI\s+(.*?)\)",cmake,re.S).group(1).split()
+        self.assertTrue({"console_surface", "console_focus"}.issubset(names))
         for name in names:
-            size=(128,128) if name=="ui_buttons" else ((96,96) if name=="focus" else (64,64))
+            size={"ui_buttons":(128,128), "focus":(96,96), "console_focus":(96,96),
+                  "console_surface":(136,170)}.get(name,(64,64))
             self.check_png(ASSETS / "ui" / f"{name}.png",size,512*1024)
         self.assertEqual((ASSETS / "ui/ui_romm.png").read_bytes(),
                          (ROOT / "assets/aurora/ui_icons/ui_romm.png").read_bytes())

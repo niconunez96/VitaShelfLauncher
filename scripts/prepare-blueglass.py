@@ -8,13 +8,14 @@ import argparse
 import hashlib
 import io
 import json
+import math
 from pathlib import Path
 import urllib.request
 import urllib.parse
 
 import cairosvg
 from fontTools.ttLib import TTFont
-from PIL import Image, ImageDraw, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "assets/blueglass"
@@ -100,6 +101,63 @@ def controls_assets():
     manifest.write_text(json.dumps(provenance,indent=2)+"\n")
 
 
+def console_assets():
+    """Bake an opaque console material and a hollow 96px nine-slice focus ring."""
+    (OUT / "ui").mkdir(parents=True, exist_ok=True)
+    scale = 4
+    size = (136, 170)
+    surface = Image.new("RGB", size)
+    pixels = []
+    for y in range(size[1]):
+        for x in range(size[0]):
+            u, v = x / (size[0]-1), y / (size[1]-1)
+            sheen = math.exp(-((u-.12)/.65)**2-((v+.05)/.48)**2)
+            light = math.exp(-((u-.05)/.28)**2-((v+.02)/.22)**2)
+            pixels.append((int(32+22*sheen+7*light),
+                           int(40+20*sheen+8*light),
+                           int(62+28*sheen+12*light)))
+    surface.putdata(pixels)
+    surface = surface.resize((size[0]*scale, size[1]*scale), Image.Resampling.BICUBIC)
+    bounds = (0, 0, surface.width-1, surface.height-1)
+    ImageDraw.Draw(surface).rounded_rectangle(bounds, radius=14*scale,
+                                             outline=(88, 101, 133), width=scale)
+    mask = Image.new("L", surface.size)
+    ImageDraw.Draw(mask).rounded_rectangle(bounds, radius=14*scale, fill=255)
+    surface.putalpha(mask)
+    surface.resize(size, Image.Resampling.LANCZOS).save(OUT / "ui/console_surface.png", optimize=True)
+
+    ring = Image.new("L", (96*scale, 96*scale))
+    bounds = (17*scale, 17*scale, 79*scale-1, 79*scale-1)
+    ImageDraw.Draw(ring).rounded_rectangle(bounds, radius=15*scale, outline=255, width=3*scale)
+    focus = Image.new("RGBA", ring.size)
+    for blur, opacity in ((5, 180), (2, 230)):
+        bloom = Image.new("RGBA", ring.size, (30, 100, 255, 0))
+        bloom.putalpha(ring.filter(ImageFilter.GaussianBlur(blur*scale)).point(lambda a: a*opacity//255))
+        focus = Image.alpha_composite(focus, bloom)
+    draw = ImageDraw.Draw(focus)
+    draw.rounded_rectangle(bounds, radius=15*scale, outline=(75, 146, 255, 255), width=3*scale)
+    draw.rounded_rectangle((18*scale, 18*scale, 78*scale-1, 78*scale-1),
+                           radius=14*scale, outline=(245, 250, 255, 255), width=5)
+    # Bound the inner bloom so focus can never tint the body of a selected card.
+    hollow = Image.new("L", ring.size)
+    ImageDraw.Draw(hollow).rounded_rectangle((24*scale, 24*scale, 72*scale-1, 72*scale-1),
+                                            radius=8*scale, fill=255)
+    focus.putalpha(ImageChops.subtract(focus.getchannel("A"), hollow))
+    focus = focus.resize((96, 96), Image.Resampling.LANCZOS)
+    # Keep the stretched middle slice exactly transparent, including filter fringes.
+    ImageDraw.Draw(focus).rectangle((31, 31, 64, 64), fill=(0, 0, 0, 0))
+    focus.save(OUT / "ui/console_focus.png", optimize=True)
+
+    manifest = OUT / "provenance.json"
+    provenance = json.loads(manifest.read_text()) if manifest.exists() else []
+    files = ("ui/console_surface.png", "ui/console_focus.png")
+    provenance = [entry for entry in provenance if entry["file"] not in files]
+    for filename in files:
+        provenance.append({"file": filename, "source": "scripts/prepare-blueglass.py --console-cards",
+                           "treatment": "Original procedural artwork: opaque blue-night material with upper-left sheen; separate hollow electric-blue focus."})
+    manifest.write_text(json.dumps(provenance, indent=2)+"\n")
+
+
 def static_assets():
     for folder in ("fonts", "logos", "ui", "backgrounds", "sources"):
         (OUT / folder).mkdir(parents=True, exist_ok=True)
@@ -163,6 +221,7 @@ def static_assets():
     focus.resize((96,96), Image.Resampling.LANCZOS).save(OUT / "ui/focus.png", optimize=True)
     (OUT / "provenance.json").write_text(json.dumps(provenance, indent=2)+"\n")
     controls_assets()
+    console_assets()
 
 
 def background(name, source):
@@ -339,6 +398,7 @@ if __name__ == "__main__":
     parser.add_argument("--finish", action="store_true")
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--controls",action="store_true")
+    parser.add_argument("--console-cards", action="store_true", help="Rebuild console material and border-only focus locally")
     parser.add_argument("--logo-service", metavar="URL", help="Rebuild console card/header logos using an imageproxy /image endpoint and retained sources")
     parser.add_argument("--background", nargs=2, metavar=("NAME", "SOURCE"))
     parser.add_argument("--preview-fixtures",metavar="DIRECTORY")
@@ -355,5 +415,7 @@ if __name__ == "__main__":
         compact_logos()
     if args.controls:
         controls_assets()
+    if args.console_cards:
+        console_assets()
     if args.logo_service:
         service_logos(args.logo_service)

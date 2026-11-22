@@ -11,7 +11,7 @@
 typedef struct { const char *name; vita2d_texture *texture; bool attempted; } Asset;
 #define A(name) {name,NULL,false}
 static Asset assets[]={
-    A("emblem"),A("focus"),A("platform_nes"),A("platform_famicom"),A("platform_snes"),
+    A("emblem"),A("focus"),A("console_surface"),A("console_focus"),A("platform_nes"),A("platform_famicom"),A("platform_snes"),
     A("platform_gameboy"),A("platform_gameboycolor"),A("platform_gba"),A("platform_nds"),
     A("platform_genesis"),A("platform_mastersystem"),A("platform_gamegear"),A("platform_psx"),
     A("platform_psp"),A("platform_vita"),A("platform_arcade"),A("platform_neogeo"),A("platform_pce"),
@@ -29,9 +29,8 @@ static Asset assets[]={
 #undef A
 static unsigned int bg,surface,ink,muted,accent;
 static int asset_budget;
-static float entrance;
-static unsigned long long focus_at,notice_at;
-static char focus_key[VP_TEXT+64],last_notice[VP_TEXT];
+static unsigned long long notice_at;
+static char last_notice[VP_TEXT];
 static unsigned int last_notice_id;
 static VpUiAppearance appearance={180,14,255};
 
@@ -83,8 +82,10 @@ static vita2d_texture *asset(const char *name) {
         if (!a->attempted && asset_budget>0) {
             char path[160]; unsigned char header[29]={0}; SceUID fd;
             bool heading=!strncmp(name,"header_",7);
-            unsigned int w=!strncmp(name,"platform_",9) || !strcmp(name,"ui_buttons")?128:(!strcmp(name,"focus")?96:64);
-            unsigned int h=w;
+            unsigned int w=!strcmp(name,"console_surface")?136:
+                (!strncmp(name,"platform_",9) || !strcmp(name,"ui_buttons")?128:
+                (!strcmp(name,"focus") || !strcmp(name,"console_focus")?96:64));
+            unsigned int h=!strcmp(name,"console_surface")?170:w;
             a->attempted=true; --asset_budget;
             (void)snprintf(path,sizeof(path),"app0:assets/blueglass/%s/%s.png",heading?"headers":(!strncmp(name,"platform_",9)?"logos":"ui"),name);
             fd=sceIoOpen(path,SCE_O_RDONLY,0);
@@ -149,6 +150,27 @@ static void glass(VpUiRect r,bool selected,bool dark) {
     if (selected) focus(r);
 }
 
+static void console_card(VpUiRect r,bool selected) {
+    vita2d_texture *material=asset("console_surface"),*ring=selected?asset("console_focus"):NULL;
+    int ix,iy;
+    float xs[]={r.x-18,r.x+14,r.x+r.w-14,r.x+r.w+18};
+    float ys[]={r.y-18,r.y+14,r.y+r.h-14,r.y+r.h+18};
+    round_rect(r.x,r.y+4,r.w,r.h,14,C(10,18,40,45));
+    /* Draw the fallback outline underneath the opaque surface, never over its body. */
+    if (selected && !ring) round_rect(r.x-2,r.y-2,r.w+4,r.h+4,16,C(174,210,255,255));
+    if (material) fit(material,r.x,r.y,r.w,r.h,0xffffffffu);
+    else {
+        round_rect(r.x,r.y,r.w,r.h,14,C(88,101,133,255));
+        round_rect(r.x+1,r.y+1,r.w-2,r.h-2,13,C(32,40,62,255));
+    }
+    if (!ring) return;
+    for (iy=0;iy<3;iy++) for (ix=0;ix<3;ix++) {
+        float w=xs[ix+1]-xs[ix],h=ys[iy+1]-ys[iy];
+        if ((ix!=1 || iy!=1) && w>0 && h>0)
+            vita2d_draw_texture_tint_part_scale(ring,xs[ix],ys[iy],ix*32,iy*32,32,32,w/32,h/32,0xffffffffu);
+    }
+}
+
 static size_t position(const VpUiFrame *f) {
     size_t i;
     for (i=0;i<f->visible_count;i++) if (f->visible[i]==f->app->selected_item) return i;
@@ -177,6 +199,7 @@ void vp_ui_prepare(const VpUiFrame *f) {
     asset_budget=3;
     for (i=0;i<sizeof(common)/sizeof(common[0]);i++) (void)asset(common[i]);
     if (f->app->active_screen==VP_SCREEN_LIBRARY && f->app->library_level==VP_LEVEL_PLATFORMS) {
+        (void)asset("console_surface"); (void)asset("console_focus");
         start=vp_ui_console_start(f->app->selected_platform,f->group_count);
         for (i=start;i<f->group_count && i<start+VP_UI_CONSOLE_PAGE;i++) (void)asset(vp_ui_platform(f->groups[i].platform)->asset);
     } else if (f->app->active_screen==VP_SCREEN_SETTINGS) {
@@ -262,8 +285,7 @@ static void platforms(const VpUiFrame *f) {
         const VpUiPlatform *platform=vp_ui_platform(f->groups[i].platform);
         VpUiRect r=vp_ui_console_tile(i-start);
         bool selected=i==f->app->selected_platform;
-        if (selected) { r.y-=(int)(7*entrance); r.h+=7; }
-        glass(r,selected,true);
+        console_card(r,selected);
         fit(asset(platform->asset),r.x+10,r.y+22,r.w-20,116,0xffffffffu);
         round_rect(r.x+(r.w-42)/2,r.y+r.h-16,42,4,2,rgb(platform->rgb));
     }
@@ -519,16 +541,11 @@ static void footer(const VpUiFrame *f) {
 
 void vp_ui_render(const VpUiFrame *f) {
     unsigned long long now=sceKernelGetProcessTimeWide();
-    char key[sizeof(focus_key)];
     bg=color(f->app->theme.background,C(53,75,124,255));
     surface=color(f->app->theme.surface,C(141,169,230,255));
     ink=color(f->app->theme.text,C(250,252,255,255));
     muted=color(f->app->theme.muted,C(204,220,249,255));
     accent=color(f->app->theme.accent,C(79,159,255,255));
-    (void)snprintf(key,sizeof(key),"%d:%d:%d:%u:%u:%d:%d:%d:%d",f->app->active_screen,f->app->library_level,f->app->active_view,
-        (unsigned)f->app->selected_platform,(unsigned)f->app->selected_item,f->settings_section,f->settings_field,f->settings_detail,f->settings_romm);
-    if (strcmp(key,focus_key)) { (void)snprintf(focus_key,sizeof(focus_key),"%s",key); focus_at=now; }
-    entrance=appearance.motion_ms?vp_ui_ease((float)(now-focus_at)/(appearance.motion_ms*1000.f)):1;
     backdrop(f,now); header(f); heading(f);
     if (f->app->active_screen==VP_SCREEN_LIBRARY) {
         if (f->app->library_level==VP_LEVEL_PLATFORMS) {
@@ -560,5 +577,5 @@ void vp_ui_shutdown(void) {
         if (assets[i].texture) vita2d_free_texture(assets[i].texture);
         assets[i].texture=NULL; assets[i].attempted=false;
     }
-    focus_key[0]=last_notice[0]='\0'; last_notice_id=0;
+    last_notice[0]='\0'; last_notice_id=0;
 }
