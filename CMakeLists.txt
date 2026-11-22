@@ -47,7 +47,7 @@ if(DEFINED ENV{VITASDK})
     platform_arcade platform_pce platform_atari2600 platform_wonderswan platform_homebrew platform_generic
     platform_dreamcast platform_n3ds platform_gamecube platform_ps2 platform_wii
     platform_gameboycolor platform_neogeo)
-  set(VP_BLUEGLASS_UI emblem focus ui_library ui_home ui_store ui_settings ui_download
+  set(VP_BLUEGLASS_UI emblem focus console_surface console_focus ui_library ui_home ui_store ui_settings ui_download
     ui_check ui_star ui_sync ui_key ui_folder ui_general ui_interface ui_storage ui_info ui_server ui_psx ui_romm ui_buttons)
   set(VP_BLUEGLASS_FILES)
   foreach(asset IN LISTS VP_BLUEGLASS_LOGOS)

@@ -20,6 +20,7 @@ static FT_Library freetype;
 static unsigned long long clock_us=1000000;
 static size_t textures,fonts,drawn;
 static bool missing;
+static const char *unavailable_asset;
 static char last_text[768];
 static char frame_text[16384];
 static _Alignas(16) unsigned char pool[1024*1024];
@@ -97,7 +98,10 @@ void *vita2d_texture_get_datap(const vita2d_texture *t) { return cairo_image_sur
 void vita2d_texture_set_filters(vita2d_texture *t,int a,int b) { (void)t;(void)a;(void)b; }
 void vita2d_free_texture(vita2d_texture *t) { cairo_surface_destroy(t->surface); free(t); textures--; }
 void vita2d_wait_rendering_done(void) {}
-SceUID sceIoOpen(const char *path,int flags,int mode) { (void)mode; return missing?-1:open(local(path),flags); }
+SceUID sceIoOpen(const char *path,int flags,int mode) {
+    (void)mode;
+    return missing || (unavailable_asset && strstr(path,unavailable_asset))?-1:open(local(path),flags);
+}
 unsigned long long sceKernelGetProcessTimeWide(void) { clock_us+=16667; return clock_us; }
 vita2d_font *vita2d_load_font_file(const char *path) {
     FT_Face face;
@@ -135,6 +139,66 @@ static void settle(VpUiFrame *frame) {
         struct timespec pause={0,2000000};
         pool_used=0; frame_text[0]='\0'; vp_ui_prepare(frame); vp_ui_render(frame); nanosleep(&pause,NULL);
     }
+}
+
+static unsigned int image_pixel(const unsigned char *bytes,int stride,int x,int y) {
+    unsigned int value;
+    memcpy(&value,bytes+y*stride+x*4,sizeof(value));
+    return value;
+}
+
+static int brightness(unsigned int pixel) {
+    return (int)(pixel&255)+(int)((pixel>>8)&255)+(int)((pixel>>16)&255);
+}
+
+static void check_console_material(VpUiFrame *frame,VpApp *app,cairo_surface_t *canvas,const char *directory) {
+    int stride=cairo_image_surface_get_stride(canvas),x,y;
+    size_t i,bytes=(size_t)stride*544;
+    unsigned char *snapshot=malloc(bytes),*current;
+    VpUiRect first=vp_ui_console_tile(0);
+    assert(snapshot);
+    app->active_screen=VP_SCREEN_LIBRARY;
+    app->library_level=VP_LEVEL_PLATFORMS;
+    frame->group_count=VP_UI_CONSOLE_PAGE;
+    app->selected_platform=0;
+    vp_ui_load_theme("ui_motion_ms=0\nui_wallpaper_alpha=0\n");
+    strcpy(app->theme.background,"#000000");
+    settle(frame); cairo_surface_flush(canvas);
+    memcpy(snapshot,cairo_image_surface_get_data(canvas),bytes);
+    app->selected_platform=1;
+    strcpy(app->theme.background,"#ffffff");
+    settle(frame); cairo_surface_flush(canvas);
+    current=cairo_image_surface_get_data(canvas);
+    /* A moving focus and opposite wallpapers must not change any card body pixel.
+     * The ten-pixel inset excludes only the intentionally illuminated perimeter. */
+    for (i=0;i<VP_UI_CONSOLE_PAGE;i++) {
+        VpUiRect r=vp_ui_console_tile(i);
+        for (y=10;y<r.h-10;y++) for (x=10;x<r.w-10;x++)
+            assert(image_pixel(snapshot,stride,r.x+x,r.y+y)==image_pixel(current,stride,r.x+x,r.y+y));
+    }
+    /* Compare the exterior outline on the same backdrop, including asset fallbacks. */
+    strcpy(app->theme.background,"#000000");
+    settle(frame); cairo_surface_flush(canvas);
+    {
+        int contrast=0;
+        for (y=-2;y<=1;y++) {
+            int focused=brightness(image_pixel(snapshot,stride,first.x+first.w/2,first.y+y));
+            int unfocused=brightness(image_pixel(current,stride,first.x+first.w/2,first.y+y));
+            if (focused-unfocused>contrast) contrast=focused-unfocused;
+        }
+        assert(contrast>100);
+    }
+    if (!missing && (!unavailable_asset || strcmp(unavailable_asset,"console_surface.png"))) {
+        int lit=brightness(image_pixel(current,stride,first.x+20,first.y+16));
+        int dark=brightness(image_pixel(current,stride,first.x+116,first.y+146));
+        assert(lit>dark+30 && dark<200);
+    }
+    if (directory) {
+        char path[1024];
+        (void)snprintf(path,sizeof(path),"%s/console-%s.png",directory,missing?"fallback":"material");
+        assert(!cairo_surface_write_to_png(canvas,path));
+    }
+    free(snapshot);
 }
 
 int main(int argc,char **argv) {
@@ -243,13 +307,18 @@ int main(int argc,char **argv) {
         }
         if (argc>1) { char path[1024]; (void)snprintf(path,sizeof(path),"%s/%s.png",argv[1],cases[c]); assert(!cairo_surface_write_to_png(canvas,path)); }
     }
+    check_console_material(&frame,&app,canvas,argc>1?argv[1]:NULL);
     vp_ui_shutdown();
-    missing=true; frame.group_count=12; app.library_level=VP_LEVEL_PLATFORMS; app.active_screen=VP_SCREEN_LIBRARY;
-    settle(&frame); vp_ui_shutdown();
+    unavailable_asset="console_focus.png";
+    check_console_material(&frame,&app,canvas,NULL); vp_ui_shutdown();
+    unavailable_asset="console_surface.png";
+    check_console_material(&frame,&app,canvas,NULL); vp_ui_shutdown();
+    unavailable_asset=NULL; missing=true;
+    check_console_material(&frame,&app,canvas,argc>1?argv[1]:NULL); vp_ui_shutdown();
     for (i=0;i<10;i++) if (covers[i]) vita2d_free_texture(covers[i]);
     vp_ui_fonts_free(&typefaces);
     assert(!textures && !fonts && drawn>0);
     cairo_destroy(cr); cairo_surface_destroy(canvas); FT_Done_FreeType(freetype);
-    puts("Blueglass renderer: 18 states, actual Inter metrics, UTF-8 truncation, missing resources and cleanup passed");
+    puts("Blueglass renderer: 18 states, opaque console bodies, border-only focus, partial/missing assets, Inter metrics and cleanup passed");
     return 0;
 }

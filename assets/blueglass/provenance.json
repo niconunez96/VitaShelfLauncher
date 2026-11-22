@@ -350,5 +350,15 @@
     "file": "headers/header_generic.png",
     "source": "ui/emblem.png",
     "treatment": "Original logo, alpha-trimmed and fitted within 128x64 by imageproxy."
+  },
+  {
+    "file": "ui/console_surface.png",
+    "source": "scripts/prepare-blueglass.py --console-cards",
+    "treatment": "Original procedural artwork: opaque blue-night material with upper-left sheen; separate hollow electric-blue focus."
+  },
+  {
+    "file": "ui/console_focus.png",
+    "source": "scripts/prepare-blueglass.py --console-cards",
+    "treatment": "Original procedural artwork: opaque blue-night material with upper-left sheen; separate hollow electric-blue focus."
   }
 ]
