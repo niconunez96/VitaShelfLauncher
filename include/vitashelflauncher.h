@@ -216,6 +216,8 @@ typedef struct {
 void vp_app_init(VpApp *app);
 void vp_app_cycle_screen(VpApp *app, int direction);
 void vp_app_cycle_view(VpApp *app);
+bool vp_view_from_string(const char *value, VpView *view);
+const char *vp_view_name(VpView view);
 void vp_app_select(VpApp *app, int direction);
 void vp_app_move(VpApp *app, int dx, int dy, int columns);
 void vp_app_open(VpApp *app);

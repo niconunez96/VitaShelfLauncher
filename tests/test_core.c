@@ -518,6 +518,7 @@ static void test_url_escape(void) {
 
 static void test_theme(void) {
     VpTheme theme;
+    VpView view = VP_VIEW_GRID;
     const char *ini = "id=amber\nname=Amber Pulse\nbackground=#000000\nsurface=#111111\n"
                       "accent=#ffaa00\ntext=#ffffff\nmuted=#999999\nview=carousel\n"
                       "card_width=170\ncard_height=220\n";
@@ -527,6 +528,10 @@ static void test_theme(void) {
     assert(theme.view == VP_VIEW_CAROUSEL);
     assert(theme.card_width == 170);
     assert(!vp_theme_load(&theme, "id=x\nname=x\nview=broken\n"));
+    assert(vp_view_from_string("list", &view) && view == VP_VIEW_LIST);
+    assert(strcmp(vp_view_name(view), "list") == 0);
+    assert(strcmp(vp_view_name(VP_VIEW_CAROUSEL), "carousel") == 0);
+    assert(!vp_view_from_string("broken", &view) && view == VP_VIEW_LIST);
 }
 
 static void test_local_library(void) {

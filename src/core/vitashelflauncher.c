@@ -895,12 +895,24 @@ void vp_app_back(VpApp *app) {
     app->installation_armed = false;
 }
 
-static bool vp_parse_view(const char *value, VpView *view) {
-    if (strcmp(value, "grid") == 0) *view = VP_VIEW_GRID;
-    else if (strcmp(value, "list") == 0) *view = VP_VIEW_LIST;
-    else if (strcmp(value, "carousel") == 0) *view = VP_VIEW_CAROUSEL;
+bool vp_view_from_string(const char *value, VpView *view) {
+    VpView parsed;
+    if (value == NULL || view == NULL) return false;
+    if (strcmp(value, "grid") == 0) parsed = VP_VIEW_GRID;
+    else if (strcmp(value, "list") == 0) parsed = VP_VIEW_LIST;
+    else if (strcmp(value, "carousel") == 0) parsed = VP_VIEW_CAROUSEL;
     else return false;
+    *view = parsed;
     return true;
+}
+
+const char *vp_view_name(VpView view) {
+    switch (view) {
+        case VP_VIEW_GRID: return "grid";
+        case VP_VIEW_LIST: return "list";
+        case VP_VIEW_CAROUSEL: return "carousel";
+        default: return "grid";
+    }
 }
 
 bool vp_theme_load(VpTheme *theme, const char *ini_text) {
@@ -927,7 +939,7 @@ bool vp_theme_load(VpTheme *theme, const char *ini_text) {
         else if (strcmp(line, "accent") == 0) vp_copy(theme->accent, sizeof(theme->accent), equals);
         else if (strcmp(line, "text") == 0) vp_copy(theme->text, sizeof(theme->text), equals);
         else if (strcmp(line, "muted") == 0) vp_copy(theme->muted, sizeof(theme->muted), equals);
-        else if (strcmp(line, "view") == 0 && !vp_parse_view(equals, &theme->view)) return false;
+        else if (strcmp(line, "view") == 0 && !vp_view_from_string(equals, &theme->view)) return false;
         else if (strcmp(line, "card_width") == 0) theme->card_width = atoi(equals);
         else if (strcmp(line, "card_height") == 0) theme->card_height = atoi(equals);
     }

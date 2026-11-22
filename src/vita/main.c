@@ -223,8 +223,19 @@ static void load_theme_file(VpApp *app, const char *path) {
 }
 
 static void load_providers(VpApp *app) {
-    FILE *file = fopen(VP_CONFIG_PATH, "r");
+    FILE *file;
     char line[512];
+    VpView configured_view = VP_VIEW_GRID;
+    bool active_view_configured = false;
+    file = fopen(VP_CONFIG_PATH, "r");
+    if (file == NULL) {
+        FILE *backup = fopen(VP_CONFIG_PATH ".bak", "r");
+        if (backup != NULL) {
+            (void)fclose(backup);
+            (void)sceIoRename(VP_CONFIG_PATH ".bak", VP_CONFIG_PATH);
+            file = fopen(VP_CONFIG_PATH, "r");
+        }
+    }
     load_theme_file(app, "app0:assets/default/theme.ini");
     if (file == NULL) return;
     while (fgets(line, sizeof(line), file) != NULL) {
@@ -241,6 +252,8 @@ static void load_providers(VpApp *app) {
             (void)snprintf(homebrew_config.catalog_url, sizeof(homebrew_config.catalog_url), "%s", equals);
         else if (strcmp(line, "active_theme") == 0)
             (void)snprintf(active_theme, sizeof(active_theme), "%s", equals);
+        else if (strcmp(line, "active_view") == 0 && vp_view_from_string(equals, &configured_view))
+            active_view_configured = true;
         else if (strncmp(line, "ui_wallpaper", 12) == 0)
             (void)vp_ui_preferences_set(&ui_preferences, line, equals);
         else if (strncmp(line, "launch_", 7) == 0)
@@ -252,18 +265,26 @@ static void load_providers(VpApp *app) {
         (void)snprintf(path, sizeof(path), "ux0:data/vitashelflauncher/themes/%s/theme.ini", active_theme);
         load_theme_file(app, path);
     }
+    if (active_view_configured) app->active_view = configured_view;
 }
 
 static bool save_romm_config(void) {
     FILE *file;
+    FILE *existing;
     size_t index;
+    bool failed;
+    bool had_config;
     (void)sceIoMkdir("ux0:data", 0777);
     (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
+    existing = fopen(VP_CONFIG_PATH, "r");
+    had_config = existing != NULL;
+    if (existing != NULL) (void)fclose(existing);
     file = fopen(VP_CONFIG_PATH ".tmp", "w");
     if (file == NULL) return false;
     (void)fprintf(file, "romm_url=%s\nromm_token=%s\nimage_proxy_url=%s\nhomebrew_catalog=%s\nactive_theme=%s\n",
                    romm_config.base_url, romm_config.token, romm_config.image_proxy_url,
                     homebrew_config.catalog_url, active_theme);
+    (void)fprintf(file, "active_view=%s\n", vp_view_name(app.active_view));
     (void)fprintf(file, "ui_wallpaper=%s\nui_wallpaper_animated=%d\n",
                   vp_ui_wallpaper(ui_preferences.wallpaper)->id, ui_preferences.animated?1:0);
     for (index = 0; index < launch_config.count; index++) {
@@ -271,13 +292,26 @@ static bool save_romm_config(void) {
         (void)fprintf(file, "launch_%s=%s:%s\n", profile->platform, profile->titleid,
                       profile->core);
     }
-    {
-        bool failed=ferror(file)!=0;
-        if (fclose(file)!=0) failed=true;
-        if (!failed && rename(VP_CONFIG_PATH ".tmp",VP_CONFIG_PATH)==0) return true;
-        (void)remove(VP_CONFIG_PATH ".tmp");
+    failed = ferror(file) != 0;
+    if (fclose(file) != 0) failed = true;
+    if (failed) {
+        (void)sceIoRemove(VP_CONFIG_PATH ".tmp");
         return false;
     }
+    if (had_config) {
+        (void)sceIoRemove(VP_CONFIG_PATH ".bak");
+        if (sceIoRename(VP_CONFIG_PATH, VP_CONFIG_PATH ".bak") < 0) {
+            (void)sceIoRemove(VP_CONFIG_PATH ".tmp");
+            return false;
+        }
+    }
+    if (sceIoRename(VP_CONFIG_PATH ".tmp", VP_CONFIG_PATH) < 0) {
+        if (had_config) (void)sceIoRename(VP_CONFIG_PATH ".bak", VP_CONFIG_PATH);
+        (void)sceIoRemove(VP_CONFIG_PATH ".tmp");
+        return false;
+    }
+    if (had_config) (void)sceIoRemove(VP_CONFIG_PATH ".bak");
+    return true;
 }
 
 static bool file_exists(const char *path) {
@@ -1775,7 +1809,14 @@ int main(void) {
                     if (selected_platform != app.selected_platform || selected_item != app.selected_item)
                         vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
                 }
-                if (pressed & SCE_CTRL_TRIANGLE) vp_app_cycle_view(&app);
+                if (pressed & SCE_CTRL_TRIANGLE) {
+                    VpView previous = app.active_view;
+                    vp_app_cycle_view(&app);
+                    if (!save_romm_config()) {
+                        app.active_view = previous;
+                        show_notification(&app, "No se pudo guardar la vista");
+                    }
+                }
                 if ((pressed & SCE_CTRL_SQUARE) && app.library_level == VP_LEVEL_ROMS &&
                     app.selected_item < app.catalog.count)
                     vp_item_toggle_favorite(&app.catalog.items[app.selected_item]);

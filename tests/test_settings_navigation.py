@@ -28,22 +28,25 @@ static VpRommConfig romm_config;
 static VpHomebrewConfig homebrew_config;
 static VpLaunchConfig launch_config;
 static VpUiPreferences ui_preferences=VP_UI_PREFERENCES_DEFAULT;
+static VpApp app;
 static char active_theme[VP_TEXT]="default";
-static void load_theme_file(VpApp *app,const char *path) { (void)app; (void)path; }
+static void load_theme_file(VpApp *app,const char *path) { (void)path; app->active_view=VP_VIEW_GRID; }
 static int sceIoMkdir(const char *path,int mode) { (void)path; (void)mode; return 0; }
+static int sceIoRemove(const char *path) { return remove(path); }
+static int sceIoRename(const char *from,const char *to) { return rename(from,to); }
 '''
         suffix = r'''
 int main(void) {
-    static VpApp app;
     char saved[4096],after[4096];
     FILE *file=fopen(VP_CONFIG_PATH,"w");
     assert(file);
     fputs("romm_url=http://127.0.0.1:1\nromm_token=test-fixture\n"
           "image_proxy_url=http://127.0.0.1:2/image\nhomebrew_catalog=http://127.0.0.1:3/catalog\n"
-          "active_theme=default\nlaunch_psx=RETROVITA:pcsx_rearmed\n",file);
+          "active_theme=default\nactive_view=list\nlaunch_psx=RETROVITA:pcsx_rearmed\n",file);
     assert(!fclose(file));
     vp_launch_config_init(&launch_config);
     load_providers(&app);
+    assert(app.active_view==VP_VIEW_LIST); /* user view wins over the theme default */
     assert(ui_preferences.wallpaper==0 && ui_preferences.animated);
     assert(vp_ui_preferences_set(&ui_preferences,"ui_wallpaper","violet"));
     assert(vp_ui_preferences_set(&ui_preferences,"ui_wallpaper_animated","0"));
@@ -52,23 +55,36 @@ int main(void) {
     memset(&homebrew_config,0,sizeof(homebrew_config));
     vp_launch_config_init(&launch_config);
     ui_preferences=(VpUiPreferences)VP_UI_PREFERENCES_DEFAULT;
+    app.active_view=VP_VIEW_GRID;
     load_providers(&app);
+    assert(app.active_view==VP_VIEW_LIST);
     assert(ui_preferences.wallpaper==1 && !ui_preferences.animated);
     assert(!strcmp(romm_config.token,"test-fixture"));
     assert(!strcmp(romm_config.image_proxy_url,"http://127.0.0.1:2/image"));
     assert(!strcmp(homebrew_config.catalog_url,"http://127.0.0.1:3/catalog"));
     const VpLaunchProfile *profile=vp_launch_config_find(&launch_config,"psx");
     assert(profile && !strcmp(profile->titleid,"RETROVITA") && !strcmp(profile->core,"pcsx_rearmed"));
+    app.active_view=VP_VIEW_CAROUSEL;
     assert(save_romm_config()); /* RomM saves keep the appearance selection. */
     file=fopen(VP_CONFIG_PATH,"r"); assert(file);
-    size_t length=fread(saved,1,sizeof(saved),file); fclose(file);
+    size_t length=fread(saved,1,sizeof(saved)-1,file); fclose(file);
+    saved[length]='\0';
+    assert(strstr(saved,"active_view=carousel\n"));
+    assert(strstr(saved,"ui_wallpaper=violet\n"));
     assert(!symlink("/dev/full",VP_CONFIG_PATH ".tmp"));
     assert(!save_romm_config());
     file=fopen(VP_CONFIG_PATH,"r"); assert(file);
     assert(fread(after,1,sizeof(after),file)==length); fclose(file);
     assert(!memcmp(saved,after,length));
     assert(access(VP_CONFIG_PATH ".tmp",F_OK)!=0);
-    puts("Appearance persistence, connection preservation and failed-save recovery: PASS");
+    assert(!rename(VP_CONFIG_PATH,VP_CONFIG_PATH ".bak")); /* interrupted save leaves no config */
+    memset(&romm_config,0,sizeof(romm_config));
+    vp_launch_config_init(&launch_config);
+    load_providers(&app);
+    assert(!strcmp(romm_config.token,"test-fixture"));
+    assert(app.active_view==VP_VIEW_CAROUSEL && ui_preferences.wallpaper==1);
+    assert(access(VP_CONFIG_PATH ".bak",F_OK)!=0);
+    puts("View and appearance persistence, backup recovery and failed-save recovery: PASS");
 }
 '''
         with tempfile.TemporaryDirectory(prefix="vitashelf-preferences-") as temporary:
@@ -233,6 +249,50 @@ int main(void) {
                  "-Iinclude", "-Isrc/vita", "-x", "c", "-", "src/core/vitashelflauncher.c",
                  "src/vita/ui_presentation.c", "-lm", "-pthread", "-o", str(probe)],
                 cwd=ROOT, input=prefix + handler + touch + suffix, text=True, check=True,
+            )
+            subprocess.run([str(probe)], check=True, timeout=5)
+
+    def test_triangle_view_change_saves_and_rolls_back(self):
+        source = (ROOT / "src/vita/main.c").read_text()
+        start = source.index("if (pressed & SCE_CTRL_TRIANGLE) {", source.index("int main(void)"))
+        end = source.index("\n                if ((pressed & SCE_CTRL_SQUARE)", start)
+        toggle = source[start:end]
+        prefix = r'''
+#include "vitashelflauncher.h"
+#include <assert.h>
+#include <stdio.h>
+enum { SCE_CTRL_TRIANGLE=32 };
+static VpApp app;
+static unsigned int pressed;
+static bool save_ok=true;
+static int saves,notices;
+static void show_notification(VpApp *value,const char *format,...) { (void)value; (void)format; notices++; }
+static bool save_romm_config(void) { saves++; return save_ok; }
+static void apply_view_toggle(void) {
+'''
+        suffix = r'''
+}
+int main(void) {
+    vp_app_init(&app);
+    pressed=SCE_CTRL_TRIANGLE;
+    apply_view_toggle();
+    assert(app.active_view==VP_VIEW_LIST && saves==1 && notices==0);
+    pressed=0; saves=0;
+    apply_view_toggle();
+    assert(app.active_view==VP_VIEW_LIST && saves==0 && notices==0);
+    save_ok=false; pressed=SCE_CTRL_TRIANGLE; saves=0;
+    apply_view_toggle();
+    assert(app.active_view==VP_VIEW_LIST && saves==1 && notices==1);
+    puts("Triangle view toggle save and rollback: PASS");
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory(prefix="vitashelf-view-toggle-") as temporary:
+            probe = pathlib.Path(temporary) / "toggle"
+            subprocess.run(
+                ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
+                 "-Iinclude", "-x", "c", "-", "src/core/vitashelflauncher.c", "-lm", "-o", str(probe)],
+                cwd=ROOT, input=prefix + toggle + suffix, text=True, check=True,
             )
             subprocess.run([str(probe)], check=True, timeout=5)
 
