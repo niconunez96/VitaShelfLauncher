@@ -76,11 +76,11 @@ int main(void) {
     }
     assert(vp_ui_touch_tile_slot(47,158)==-1);
     assert(vp_ui_touch_tile_slot(210,158)==-1);
-    assert(vp_ui_touch_dock_screen(256,20)==0);
-    assert(vp_ui_touch_dock_screen(406,20)==1);
-    assert(vp_ui_touch_dock_screen(518,20)==2);
-    assert(vp_ui_touch_dock_screen(638,20)==-1);
-    assert(vp_ui_touch_dock_screen(278,500)==-1);
+    assert(vp_ui_touch_dock_screen(68,20)==0);
+    assert(vp_ui_touch_dock_screen(218,20)==1);
+    assert(vp_ui_touch_dock_screen(330,20)==2);
+    assert(vp_ui_touch_dock_screen(454,20)==-1);
+    assert(vp_ui_touch_dock_screen(90,500)==-1);
     assert(vp_ui_touch_view_toggle(824,513));
     assert(!vp_ui_touch_view_toggle(803,513));
     assert(vp_ui_touch_back(613,513));

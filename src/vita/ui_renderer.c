@@ -11,7 +11,7 @@
 typedef struct { const char *name; vita2d_texture *texture; bool attempted; } Asset;
 #define A(name) {name,NULL,false}
 static Asset assets[]={
-    A("emblem"),A("focus"),A("console_surface"),A("console_focus"),A("platform_nes"),A("platform_famicom"),A("platform_snes"),
+    A("focus"),A("console_surface"),A("console_focus"),A("platform_nes"),A("platform_famicom"),A("platform_snes"),
     A("platform_gameboy"),A("platform_gameboycolor"),A("platform_gba"),A("platform_nds"),
     A("platform_genesis"),A("platform_mastersystem"),A("platform_gamegear"),A("platform_psx"),
     A("platform_psp"),A("platform_vita"),A("platform_arcade"),A("platform_neogeo"),A("platform_pce"),
@@ -194,7 +194,7 @@ static const char *heading_asset(const VpUiFrame *f) {
 }
 
 void vp_ui_prepare(const VpUiFrame *f) {
-    static const char *common[]={"emblem","focus","ui_buttons","ui_library","ui_store","ui_settings","ui_download","ui_check","ui_star","ui_psx"};
+    static const char *common[]={"focus","ui_buttons","ui_library","ui_store","ui_settings","ui_download","ui_check","ui_star","ui_psx"};
     size_t i,start;
     asset_budget=3;
     for (i=0;i<sizeof(common)/sizeof(common[0]);i++) (void)asset(common[i]);
@@ -236,10 +236,8 @@ static void header(const VpUiFrame *f) {
     static const char *names[]={"Biblioteca","Tienda","Ajustes"};
     static const char *icons[]={"ui_library","ui_store","ui_settings"};
     int i;
-    icon("emblem",30,19,30);
-    text(f,VP_TYPE_BRAND,68,41,164,ink,"VitaShelf Launcher");
-    static const int tab_x[]={256,406,518},tab_w[]={146,108,120};
-    round_rect(252,13,390,44,22,C(100,126,181,65));
+    static const int tab_x[]={68,218,330},tab_w[]={146,108,120};
+    round_rect(64,13,390,44,22,C(100,126,181,65));
     for (i=0;i<3;i++) {
         bool selected=(int)f->app->active_screen==i;
         VpUiRect r={tab_x[i],17,tab_w[i],36};

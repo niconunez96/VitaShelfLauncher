@@ -148,8 +148,8 @@ int vp_ui_touch_list_slot(int x, int y) {
 }
 
 int vp_ui_touch_dock_screen(int x, int y) {
-    if (y < 14 || y >= 56 || x < 254 || x >= 638) return -1;
-    return x<402?0:(x<514?1:2);
+    if (y < 14 || y >= 56 || x < 64 || x >= 454) return -1;
+    return x<216?0:(x<328?1:2);
 }
 
 bool vp_ui_touch_view_toggle(int x, int y) {
