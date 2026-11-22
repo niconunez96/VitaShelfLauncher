@@ -220,6 +220,47 @@ static void check_console_material(VpUiFrame *frame,VpApp *app,cairo_surface_t *
     free(snapshot);
 }
 
+static void check_carousel_motion(VpUiFrame *frame,VpApp *app,cairo_surface_t *canvas,const char *directory) {
+    int stride=cairo_image_surface_get_stride(canvas),x,y,changed=0;
+    size_t bytes=(size_t)stride*544;
+    unsigned char *snapshot=malloc(bytes),*current;
+    size_t saved_item=app->selected_item;
+    VpLibraryLevel saved_level=app->library_level;
+    VpView saved_view=app->active_view;
+    bool saved_animated=frame->preferences.animated;
+    assert(snapshot);
+    app->active_screen=VP_SCREEN_LIBRARY; app->library_level=VP_LEVEL_ROMS; app->active_view=VP_VIEW_CAROUSEL;
+    frame->preferences.animated=false;
+    strcpy(app->theme.background,"#000000");
+    vp_ui_load_theme("ui_motion_ms=0\nui_wallpaper_alpha=0\n");
+    app->selected_item=0; settle(frame); cairo_surface_flush(canvas);
+    memcpy(snapshot,cairo_image_surface_get_data(canvas),bytes);
+    vp_ui_load_theme("ui_motion_ms=180\nui_wallpaper_alpha=0\n");
+    app->selected_item=1;
+    pool_used=0; frame_text[0]='\0'; vp_ui_prepare(frame); clear_canvas(); vp_ui_render(frame);
+    cairo_surface_flush(canvas);
+    current=cairo_image_surface_get_data(canvas);
+    for (y=130;y<410;y++) for (x=200;x<760;x++)
+        if (image_pixel(snapshot,stride,x,y)!=image_pixel(current,stride,x,y)) changed++;
+    assert(changed>2000);
+    if (directory) {
+        char path[1024];
+        (void)snprintf(path,sizeof(path),"%s/carousel-motion.png",directory);
+        assert(!cairo_surface_write_to_png(canvas,path));
+    }
+    settle(frame); cairo_surface_flush(canvas);
+    memcpy(snapshot,cairo_image_surface_get_data(canvas),bytes);
+    vp_ui_load_theme("ui_motion_ms=0\nui_wallpaper_alpha=0\n");
+    pool_used=0; frame_text[0]='\0'; vp_ui_prepare(frame); clear_canvas(); vp_ui_render(frame);
+    cairo_surface_flush(canvas);
+    current=cairo_image_surface_get_data(canvas);
+    for (y=130;y<410;y++) for (x=200;x<760;x++)
+        assert(image_pixel(snapshot,stride,x,y)==image_pixel(current,stride,x,y));
+    free(snapshot);
+    app->selected_item=saved_item; app->library_level=saved_level; app->active_view=saved_view;
+    frame->preferences.animated=saved_animated;
+}
+
 int main(int argc,char **argv) {
     static VpApp app,before;
     static VpDownloadQueue queue;
@@ -322,7 +363,8 @@ int main(int argc,char **argv) {
         (void)snprintf(app.active_platform,sizeof(app.active_platform),"psx");
         frame.romm_state=c==10?VP_ROMM_UNCONFIGURED:VP_ROMM_CONNECTED;
         for (i=0;i<10;i++) frame.covers[i]=covers[i];
-        if (app.active_view==VP_VIEW_CAROUSEL) for (i=0;i<7;i++) frame.covers[i]=covers[(i+7)%10];
+        if (app.active_view==VP_VIEW_CAROUSEL)
+            for (i=0;i<2*VP_UI_CAROUSEL_REACH+1;i++) frame.covers[i]=covers[i%10];
         before=app; settle(&frame); assert(!memcmp(&app,&before,sizeof(app)));
         if (c==4) {
             const char *integrations=strstr(frame_text,"Integraciones\n"),*downloads=strstr(frame_text,"Descargas\n"),*about=strstr(frame_text,"Acerca de\n");
@@ -367,6 +409,7 @@ int main(int argc,char **argv) {
         }
         if (argc>1) { char path[1024]; (void)snprintf(path,sizeof(path),"%s/%s.png",argv[1],cases[c]); assert(!cairo_surface_write_to_png(canvas,path)); }
     }
+    check_carousel_motion(&frame,&app,canvas,argc>1?argv[1]:NULL);
     check_console_material(&frame,&app,canvas,argc>1?argv[1]:NULL);
     vp_ui_shutdown();
     unavailable_asset="console_focus.png";
@@ -379,6 +422,6 @@ int main(int argc,char **argv) {
     vp_ui_fonts_free(&typefaces);
     assert(!textures && !fonts && drawn>0);
     cairo_destroy(cr); cairo_surface_destroy(canvas); FT_Done_FreeType(freetype);
-    puts("Blueglass renderer: 29 states, separate integrations, masked keys, progress, wallpapers, console materials, Inter metrics and cleanup passed");
+    puts("Blueglass renderer: 29 states, separate integrations, masked keys, progress, wallpapers, carousel motion, console materials, Inter metrics and cleanup passed");
     return 0;
 }

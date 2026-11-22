@@ -130,6 +130,58 @@ VpUiRect vp_ui_carousel_tile(int offset) {
     return r;
 }
 
+void vp_ui_carousel_motion_update(VpUiCarouselMotion *m, size_t selected, size_t total,
+                                  unsigned long long now, int duration_ms) {
+    float progress, target;
+    if (!total || selected>=total) {
+        memset(m,0,sizeof(*m));
+        return;
+    }
+    target=(float)selected;
+    if (m->count!=total || duration_ms<=0) {
+        memset(m,0,sizeof(*m));
+        m->count=total; m->selected=selected; m->changed_at=now;
+        m->scroll=m->from_scroll=target;
+        return;
+    }
+    if (m->selected==selected) {
+        progress=now>=m->changed_at?(float)(now-m->changed_at)/(duration_ms*1000.f):0;
+        if (progress>1) progress=1;
+        m->scroll=m->from_scroll+(target-m->from_scroll)*vp_ui_ease(progress);
+        m->pop=fmaxf(m->from_pop*(1-vp_ui_ease(progress)),sinf(3.14159265f*progress));
+        return;
+    }
+    /* Catalog wraps: jump to the adjacent card instead of sweeping every game. */
+    if ((selected==0 && m->selected==total-1) || (selected==total-1 && m->selected==0))
+        m->scroll=target;
+    /* Retargeting keeps the current interpolated pose, so no frame jumps. */
+    m->from_scroll=m->scroll;
+    m->from_pop=m->pop;
+    m->selected=selected; m->changed_at=now;
+}
+
+float vp_ui_carousel_motion_focus(const VpUiCarouselMotion *m, int position) {
+    float distance=fabsf((float)position-m->scroll);
+    return distance>=1?0:1-distance;
+}
+
+VpUiRect vp_ui_carousel_motion_tile(const VpUiCarouselMotion *m, int position) {
+    float offset=(float)position-m->scroll;
+    int low=(int)floorf(offset);
+    float blend=offset-(float)low;
+    VpUiRect from=vp_ui_carousel_tile(low),to=vp_ui_carousel_tile(low+1),r;
+    float pop=m->pop*fmaxf(0,1-fabsf(offset)/2);
+    float scale=1+.08f*pop;
+    r.x=(int)lroundf(from.x+(to.x-from.x)*blend);
+    r.y=(int)lroundf(from.y+(to.y-from.y)*blend);
+    r.w=(int)lroundf(from.w+(to.w-from.w)*blend);
+    r.h=(int)lroundf(from.h+(to.h-from.h)*blend);
+    r.x=(int)lroundf(r.x-r.w*(scale-1)/2);
+    r.y=(int)lroundf(r.y-6*pop-r.h*(scale-1)/2);
+    r.w=(int)lroundf(r.w*scale); r.h=(int)lroundf(r.h*scale);
+    return r;
+}
+
 VpUiRect vp_ui_settings_row(size_t slot) {
     VpUiRect r = {310, 108 + (int)slot * 60, 418, 50};
     return r;

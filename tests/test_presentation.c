@@ -56,6 +56,57 @@ static void test_console_motion(void) {
     assert(m.count==0);
 }
 
+static void test_carousel_motion(void) {
+    VpUiCarouselMotion m={0};
+    VpUiRect center,side,before,after,r;
+    int i;
+    vp_ui_carousel_motion_update(&m,3,12,1000000,180);
+    assert(m.scroll==3 && m.pop==0 && m.count==12);
+    center=vp_ui_carousel_motion_tile(&m,3);
+    side=vp_ui_carousel_motion_tile(&m,2);
+    assert(center.x==370 && center.y==150 && center.w==220 && center.h==246);
+    assert(side.x==228 && side.y==190 && side.w==122 && side.h==168);
+    assert(vp_ui_carousel_motion_focus(&m,3)==1 && vp_ui_carousel_motion_focus(&m,4)==0);
+    vp_ui_carousel_motion_update(&m,4,12,1000000,180);
+    assert(m.scroll==3 && m.pop==0);
+    vp_ui_carousel_motion_update(&m,4,12,1090000,180);
+    assert(m.scroll>3 && m.scroll<4 && m.pop>0);
+    r=vp_ui_carousel_motion_tile(&m,4);
+    assert(r.x>370 && r.x<604 && r.w>180 && r.w<240);
+    assert(vp_ui_carousel_motion_focus(&m,4)>0 && vp_ui_carousel_motion_focus(&m,3)>0);
+    before=vp_ui_carousel_motion_tile(&m,4);
+    vp_ui_carousel_motion_update(&m,2,12,1090000,180);
+    after=vp_ui_carousel_motion_tile(&m,4);
+    assert(!memcmp(&before,&after,sizeof(before)));
+    assert(m.scroll>3 && m.pop>0);
+    vp_ui_carousel_motion_update(&m,2,12,1180000,180);
+    assert(m.scroll>2 && m.scroll<3 && m.pop>0);
+    vp_ui_carousel_motion_update(&m,2,12,1270000,180);
+    assert(m.scroll==2 && m.pop==0);
+    r=vp_ui_carousel_motion_tile(&m,2);
+    assert(!memcmp(&center,&r,sizeof(r)));
+    vp_ui_carousel_motion_update(&m,7,12,1300000,0);
+    assert(m.scroll==7 && m.pop==0);
+    vp_ui_carousel_motion_update(&m,11,12,1400000,180);
+    vp_ui_carousel_motion_update(&m,0,12,1400000,180);
+    assert(m.scroll==0);
+    for (i=0;i<=180;i+=15) {
+        int position;
+        vp_ui_carousel_motion_update(&m,0,12,1500000+i*1000,180);
+        for (position=-VP_UI_CAROUSEL_REACH;position<=VP_UI_CAROUSEL_REACH;position++) {
+            VpUiRect tile=vp_ui_carousel_motion_tile(&m,position);
+            assert(tile.x>=-200 && tile.x<=1000 && tile.y>=130 && tile.y+tile.h<=420);
+        }
+    }
+    assert(m.scroll==0 && m.pop==0);
+    vp_ui_carousel_motion_update(&m,5,13,1700000,180);
+    assert(m.count==13 && m.scroll==5 && m.pop==0);
+    vp_ui_carousel_motion_update(&m,0,0,1800000,180);
+    assert(m.count==0 && m.scroll==0);
+    vp_ui_carousel_motion_update(&m,0,1,1900000,180);
+    assert(m.count==1 && m.scroll==0 && m.pop==0);
+}
+
 int main(void) {
     VpUiAppearance appearance = {180, 16, 130};
     const char *aliases[][2] = {
@@ -65,6 +116,7 @@ int main(void) {
     };
     size_t i;
     test_console_motion();
+    test_carousel_motion();
     const char *requested[][2] = {
         {"arcade", "platform_arcade"}, {"dreamcast", "platform_dreamcast"}, {"dc", "platform_dreamcast"},
         {"gba", "platform_gba"}, {"3ds", "platform_n3ds"}, {"n3ds", "platform_n3ds"},

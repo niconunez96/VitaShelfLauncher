@@ -1693,7 +1693,7 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
             start = (position / page_size) * page_size;
             if (visible_count && app->active_view == VP_VIEW_CAROUSEL) {
                 cover_indexes[cover_count++] = visible_indexes[position];
-                for (int distance=1;distance<=3;distance++) {
+                for (int distance=1;distance<=VP_UI_CAROUSEL_REACH;distance++) {
                     cover_indexes[cover_count++] = visible_indexes[(position+visible_count-(size_t)distance%visible_count)%visible_count];
                     cover_indexes[cover_count++] = visible_indexes[(position+(size_t)distance)%visible_count];
                 }
@@ -1723,9 +1723,9 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
         size_t page = vp_ui_page_size(app->active_view);
         size_t start = (position / page) * page;
         if (app->active_view == VP_VIEW_CAROUSEL) {
-            for (int offset=-3;offset<=3;offset++) {
+            for (int offset=-VP_UI_CAROUSEL_REACH;offset<=VP_UI_CAROUSEL_REACH;offset++) {
                 size_t slot=(position+visible_count+(size_t)((offset+(int)visible_count)%(int)visible_count))%visible_count;
-                frame->covers[offset+3] = cover_texture_for(app->catalog.items[visible_indexes[slot]].id);
+                frame->covers[offset+VP_UI_CAROUSEL_REACH] = cover_texture_for(app->catalog.items[visible_indexes[slot]].id);
             }
         } else {
             for (index = start; index < visible_count && index < start + page; index++)
