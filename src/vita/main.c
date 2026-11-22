@@ -823,16 +823,15 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
     }
     if (settings_section == VP_SETTINGS_APPEARANCE) {
         if (pressed & SCE_CTRL_UP) {
-            settings_field=settings_field==VP_UI_WALLPAPER_COUNT?2:
-                (settings_field<2?VP_UI_WALLPAPER_COUNT:settings_field-2);
+            settings_field=settings_field>=2?settings_field-2:VP_UI_WALLPAPER_COUNT;
             vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
         }
         if (pressed & SCE_CTRL_DOWN) {
             settings_field=settings_field==VP_UI_WALLPAPER_COUNT?0:
-                (settings_field<2?2:VP_UI_WALLPAPER_COUNT);
+                (settings_field<2?settings_field+2:VP_UI_WALLPAPER_COUNT);
             vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
         }
-        if (pressed & (SCE_CTRL_LEFT|SCE_CTRL_RIGHT) && settings_field<2) {
+        if (pressed & (SCE_CTRL_LEFT|SCE_CTRL_RIGHT) && settings_field<VP_UI_WALLPAPER_COUNT) {
             settings_field^=1;
             vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
         }

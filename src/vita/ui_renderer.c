@@ -25,7 +25,7 @@ static Asset assets[]={
     A("ui_library"),A("ui_store"),A("ui_settings"),A("ui_download"),A("ui_check"),A("ui_star"),
     A("ui_home"),A("ui_key"),A("ui_sync"),A("ui_folder"),A("ui_general"),A("ui_interface"),
     A("ui_storage"),A("ui_info"),A("ui_server"),A("ui_psx"),A("ui_romm"),A("ui_buttons"),
-    A("wallpaper_dark-blue"),A("wallpaper_violet"),A("wallpaper_blue-waves")
+    A("wallpaper_dark-blue"),A("wallpaper_violet"),A("wallpaper_blue-waves"),A("wallpaper_light-blue")
 };
 #undef A
 static unsigned int bg,surface,ink,muted,accent;

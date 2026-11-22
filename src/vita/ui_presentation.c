@@ -104,7 +104,8 @@ const VpUiWallpaper *vp_ui_wallpaper(int index) {
     static const VpUiWallpaper wallpapers[VP_UI_WALLPAPER_COUNT] = {
         {"dark-blue", "Azul oscuro", "wallpaper_dark-blue"},
         {"violet", "Violeta", "wallpaper_violet"},
-        {"blue-waves", "Ondas azules", "wallpaper_blue-waves"}
+        {"blue-waves", "Ondas azules", "wallpaper_blue-waves"},
+        {"light-blue", "Azul claro", "wallpaper_light-blue"}
     };
     return &wallpapers[index>=0 && index<VP_UI_WALLPAPER_COUNT?index:0];
 }

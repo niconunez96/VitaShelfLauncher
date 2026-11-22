@@ -57,7 +57,7 @@ if(DEFINED ENV{VITASDK})
     list(APPEND VP_BLUEGLASS_FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/headers/${header}.png" "assets/blueglass/headers/${header}.png")
   endforeach()
-  set(VP_WALLPAPERS dark-blue violet blue-waves)
+  set(VP_WALLPAPERS dark-blue violet blue-waves light-blue)
   foreach(wallpaper IN LISTS VP_WALLPAPERS)
     list(APPEND VP_BLUEGLASS_FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/wallpapers/${wallpaper}.png" "assets/blueglass/wallpapers/${wallpaper}.png"

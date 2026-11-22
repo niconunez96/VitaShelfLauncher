@@ -10,20 +10,20 @@
       960,
       544
     ],
-    "treatment": "Remove top-edge remnants, center-crop without distortion, Lanczos resize to 960x544 and 240x136."
+    "treatment": "Center-crop without distortion, Lanczos resize to 960x544 and 240x136."
   },
   {
     "file": "wallpapers/violet.png",
     "thumbnail": "wallpapers/wallpaper_violet.png",
     "source": "User-supplied image attachment; ownership and upstream license not specified.",
-    "sha256_source": "bb0e3f950e8e0ab12f506f12818e38019341d1034fca1962719bed9032fba6d0",
+    "sha256_source": "54629e0fbfbc5aa9f653b325636fa16047aa9e02bc6cc8794c46e8cddc72c75b",
     "crop_before_fit": [
       0,
-      12,
-      960,
-      544
+      0,
+      2000,
+      667
     ],
-    "treatment": "Remove top-edge remnants, center-crop without distortion, Lanczos resize to 960x544 and 240x136."
+    "treatment": "Center-crop without distortion, Lanczos resize to 960x544 and 240x136."
   },
   {
     "file": "wallpapers/blue-waves.png",
@@ -36,6 +36,19 @@
       1584,
       993
     ],
-    "treatment": "Remove top-edge remnants, center-crop without distortion, Lanczos resize to 960x544 and 240x136."
+    "treatment": "Center-crop without distortion, Lanczos resize to 960x544 and 240x136."
+  },
+  {
+    "file": "wallpapers/light-blue.png",
+    "thumbnail": "wallpapers/wallpaper_light-blue.png",
+    "source": "User-supplied image attachment; ownership and upstream license not specified.",
+    "sha256_source": "38763d86ee4366f3b232f2ddadc8a6a62a23abab611284606fe907e9e9a251b5",
+    "crop_before_fit": [
+      0,
+      0,
+      2000,
+      667
+    ],
+    "treatment": "Center-crop without distortion, Lanczos resize to 960x544 and 240x136."
   }
 ]
