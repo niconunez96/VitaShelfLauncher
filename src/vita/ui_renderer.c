@@ -25,7 +25,7 @@ static Asset assets[]={
     A("ui_library"),A("ui_store"),A("ui_settings"),A("ui_download"),A("ui_check"),A("ui_star"),
     A("ui_home"),A("ui_key"),A("ui_sync"),A("ui_folder"),A("ui_general"),A("ui_interface"),
     A("ui_storage"),A("ui_info"),A("ui_server"),A("ui_psx"),A("ui_romm"),A("ui_buttons"),
-    A("wallpaper_dark-blue"),A("wallpaper_silver"),A("wallpaper_violet"),A("wallpaper_blue-waves")
+    A("wallpaper_dark-blue"),A("wallpaper_violet"),A("wallpaper_blue-waves")
 };
 #undef A
 static unsigned int bg,surface,ink,muted,accent;
@@ -217,21 +217,10 @@ void vp_ui_prepare(const VpUiFrame *f) {
 static void backdrop(const VpUiFrame *f,unsigned long long now) {
     int y;
     bool settings=f->app->active_screen==VP_SCREEN_SETTINGS;
-    for (y=0;y<544;y+=8) {
-        float t=(float)y/544;
-        vita2d_draw_rectangle(0,y,960,8,mix(bg,C(176,200,246,255),t));
-    }
     vp_ui_backdrop_draw(now,appearance.motion_ms,(unsigned int)appearance.wallpaper_alpha,
         f->preferences.animated);
-    if (f->preferences.wallpaper==1) vita2d_draw_rectangle(0,0,960,544,C(10,24,51,95));
     if (!settings && f->app->library_level==VP_LEVEL_ROMS && f->background && f->app->active_view!=VP_VIEW_GRID)
         fit(f->background,370,58,590,380,C(255,255,255,125));
-    if (!settings) {
-        for (y=110;y<492;y+=8) {
-            unsigned int a=(unsigned int)(30+145*(float)(y-110)/382);
-            vita2d_draw_rectangle(0,y,960,8,C(192,210,250,a));
-        }
-    }
     for (y=0;y<72;y+=8) vita2d_draw_rectangle(0,y,960,8,C(21,35,73,(unsigned int)(80-y)));
 }
 

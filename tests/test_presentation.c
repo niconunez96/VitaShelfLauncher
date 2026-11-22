@@ -71,13 +71,13 @@ int main(void) {
         VpUiPreferences preferences=VP_UI_PREFERENCES_DEFAULT;
         assert(preferences.wallpaper==0 && preferences.animated);
         assert(!strcmp(vp_ui_wallpaper(-1)->id,"dark-blue"));
-        assert(!strcmp(vp_ui_wallpaper(4)->id,"dark-blue"));
+        assert(!strcmp(vp_ui_wallpaper(VP_UI_WALLPAPER_COUNT)->id,"dark-blue"));
         for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) {
             assert(vp_ui_preferences_set(&preferences,"ui_wallpaper",vp_ui_wallpaper((int)i)->id));
             assert(preferences.wallpaper==(int)i);
         }
         assert(!vp_ui_preferences_set(&preferences,"ui_wallpaper","../../other"));
-        assert(preferences.wallpaper==3);
+        assert(preferences.wallpaper==VP_UI_WALLPAPER_COUNT-1);
         assert(vp_ui_preferences_set(&preferences,"ui_wallpaper_animated","0") && !preferences.animated);
         assert(!vp_ui_preferences_set(&preferences,"ui_wallpaper_animated","2") && !preferences.animated);
         assert(!vp_ui_preferences_set(&preferences,"unrelated","1"));

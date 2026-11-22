@@ -13,19 +13,6 @@
     "treatment": "Remove top-edge remnants, center-crop without distortion, Lanczos resize to 960x544 and 240x136."
   },
   {
-    "file": "wallpapers/silver.png",
-    "thumbnail": "wallpapers/wallpaper_silver.png",
-    "source": "User-supplied image attachment; ownership and upstream license not specified.",
-    "sha256_source": "12e73487c39d567b022471a1343f7e5ff09cc628997a037d817c48414c7ef918",
-    "crop_before_fit": [
-      0,
-      3,
-      960,
-      544
-    ],
-    "treatment": "Remove top-edge remnants, center-crop without distortion, Lanczos resize to 960x544 and 240x136."
-  },
-  {
     "file": "wallpapers/violet.png",
     "thumbnail": "wallpapers/wallpaper_violet.png",
     "source": "User-supplied image attachment; ownership and upstream license not specified.",

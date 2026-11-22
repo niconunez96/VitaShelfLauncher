@@ -10,7 +10,7 @@ typedef struct { int motion_ms, radius, wallpaper_alpha; } VpUiAppearance;
 typedef struct { int wallpaper; bool animated; } VpUiPreferences;
 typedef struct { const char *id, *label, *thumbnail; } VpUiWallpaper;
 typedef struct { float x, y, scale; } VpUiBackdropTransform;
-#define VP_UI_WALLPAPER_COUNT 4
+#define VP_UI_WALLPAPER_COUNT 3
 #define VP_UI_PREFERENCES_DEFAULT {0, true}
 typedef enum {
     VP_SETTINGS_INTEGRATIONS,

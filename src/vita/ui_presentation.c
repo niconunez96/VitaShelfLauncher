@@ -103,7 +103,6 @@ static bool inside(VpUiRect r, int x, int y) {
 const VpUiWallpaper *vp_ui_wallpaper(int index) {
     static const VpUiWallpaper wallpapers[VP_UI_WALLPAPER_COUNT] = {
         {"dark-blue", "Azul oscuro", "wallpaper_dark-blue"},
-        {"silver", "Plateado", "wallpaper_silver"},
         {"violet", "Violeta", "wallpaper_violet"},
         {"blue-waves", "Ondas azules", "wallpaper_blue-waves"}
     };

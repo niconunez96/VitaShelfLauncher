@@ -53,7 +53,7 @@ int main(void) {
     vp_launch_config_init(&launch_config);
     ui_preferences=(VpUiPreferences)VP_UI_PREFERENCES_DEFAULT;
     load_providers(&app);
-    assert(ui_preferences.wallpaper==2 && !ui_preferences.animated);
+    assert(ui_preferences.wallpaper==1 && !ui_preferences.animated);
     assert(!strcmp(romm_config.token,"test-fixture"));
     assert(!strcmp(romm_config.image_proxy_url,"http://127.0.0.1:2/image"));
     assert(!strcmp(homebrew_config.catalog_url,"http://127.0.0.1:3/catalog"));
@@ -176,9 +176,9 @@ int main(void) {
     handle_settings_input(&app,SCE_CTRL_CROSS);
     assert(ui_preferences.wallpaper==1 && saves==1);
     handle_settings_input(&app,SCE_CTRL_DOWN);
-    assert(settings_field==3);
+    assert(settings_field==2);
     handle_settings_input(&app,SCE_CTRL_CROSS);
-    assert(ui_preferences.wallpaper==3 && saves==2);
+    assert(ui_preferences.wallpaper==2 && saves==2);
     handle_settings_input(&app,SCE_CTRL_DOWN);
     assert(settings_field==VP_UI_WALLPAPER_COUNT);
     handle_settings_input(&app,SCE_CTRL_CROSS);
@@ -189,7 +189,7 @@ int main(void) {
     handle_settings_input(&app,SCE_CTRL_DOWN);
     assert(settings_field==0);
     handle_settings_input(&app,SCE_CTRL_CROSS);
-    assert(ui_preferences.wallpaper==3 && saves==5);
+    assert(ui_preferences.wallpaper==2 && saves==5);
     save_ok=true;
     handle_settings_input(&app,SCE_CTRL_UP);
     assert(settings_field==VP_UI_WALLPAPER_COUNT);
@@ -197,7 +197,7 @@ int main(void) {
     assert(settings_field==2);
     handle_settings_input(&app,SCE_CTRL_CIRCLE);
     handle_settings_input(&app,SCE_CTRL_CROSS);
-    assert(settings_field==3);
+    assert(settings_field==2);
     handle_settings_input(&app,SCE_CTRL_CIRCLE);
     handle_settings_input(&app,SCE_CTRL_DOWN);
     assert(settings_section==VP_SETTINGS_ABOUT);

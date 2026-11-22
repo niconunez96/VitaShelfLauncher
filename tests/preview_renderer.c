@@ -44,6 +44,12 @@ static const char *local(const char *path) { return !strncmp(path,"app0:",5)?pat
 static void source(unsigned int c) {
     cairo_set_source_rgba(cr,(c&255)/255.,((c>>8)&255)/255.,((c>>16)&255)/255.,(c>>24)/255.);
 }
+static void clear_canvas(void) {
+    cairo_save(cr);
+    cairo_set_operator(cr,CAIRO_OPERATOR_CLEAR);
+    cairo_paint(cr);
+    cairo_restore(cr);
+}
 void vita2d_draw_rectangle(float x,float y,float w,float h,unsigned int c) {
     assert(isfinite(x)&&isfinite(y)&&w>=0&&h>=0);
     source(c); cairo_rectangle(cr,x,y,w,h); cairo_fill(cr);
@@ -137,7 +143,7 @@ static void settle(VpUiFrame *frame) {
     size_t i;
     for (i=0;i<45;i++) {
         struct timespec pause={0,2000000};
-        pool_used=0; frame_text[0]='\0'; vp_ui_prepare(frame); vp_ui_render(frame); nanosleep(&pause,NULL);
+        pool_used=0; frame_text[0]='\0'; vp_ui_prepare(frame); clear_canvas(); vp_ui_render(frame); nanosleep(&pause,NULL);
     }
 }
 
@@ -213,7 +219,7 @@ int main(int argc,char **argv) {
     const char *slugs[]={"arcade","dreamcast","gba","nds","gamecube","psx","psp","3ds","ps2","snes","genesis","wii"};
     const char *titles[]={"Bloody Roar II","Castlevania: Symphony of the Night","Crash Bandicoot","Gran Turismo","Metal Gear Solid",
         "Resident Evil","Silent Hill","Dino Crisis","Tomb Raider","Ridge Racer","A game with a very long title and accents: aventura fantástica","Another game"};
-    const char *cases[]={"platforms","carousel","list","grid","settings","integrations","downloads","downloads-empty","romm","about","about-disconnected","about-never-synced","store","empty","last-page","platforms-arcade","platforms-gba","platforms-last","appearance-dark","appearance-silver","appearance-violet","appearance-waves"};
+    const char *cases[]={"platforms","carousel","list","grid","settings","integrations","downloads","downloads-empty","romm","about","about-disconnected","about-never-synced","store","empty","last-page","platforms-arcade","platforms-gba","platforms-last","appearance-dark","appearance-violet","appearance-waves"};
     size_t c,i;
     cr=cairo_create(canvas); assert(!FT_Init_FreeType(&freetype)); assert(vp_ui_fonts_load(&typefaces));
     assert(vp_ui_backdrop_init());
@@ -279,7 +285,7 @@ int main(int argc,char **argv) {
         if (c>=18) {
             app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=true;
             frame.settings_section=VP_SETTINGS_APPEARANCE; frame.settings_field=(int)c-18;
-            frame.preferences.wallpaper=(int)c-18; frame.preferences.animated=c!=21;
+            frame.preferences.wallpaper=(int)c-18; frame.preferences.animated=c!=20;
         }
         (void)snprintf(app.active_platform,sizeof(app.active_platform),"psx");
         frame.romm_state=c==10?VP_ROMM_UNCONFIGURED:VP_ROMM_CONNECTED;
@@ -297,7 +303,7 @@ int main(int argc,char **argv) {
         if (c>=18) {
             for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) assert(strstr(frame_text,vp_ui_wallpaper((int)i)->label));
             assert(strstr(frame_text,"Fondo animado\n"));
-            assert(strstr(frame_text,c==21?"Desactivado\n":"Activado\n"));
+            assert(strstr(frame_text,c==20?"Desactivado\n":"Activado\n"));
         }
         if (c>=9 && c<=11) {
             assert(strstr(frame_text,"VitaShelf Launcher · 01.00\n"));
@@ -330,6 +336,6 @@ int main(int argc,char **argv) {
     vp_ui_fonts_free(&typefaces);
     assert(!textures && !fonts && drawn>0);
     cairo_destroy(cr); cairo_surface_destroy(canvas); FT_Done_FreeType(freetype);
-    puts("Blueglass renderer: 22 states, four wallpapers, opaque console bodies, border-only focus, partial/missing assets, Inter metrics and cleanup passed");
+    puts("Blueglass renderer: 21 states, three wallpapers, opaque console bodies, border-only focus, partial/missing assets, Inter metrics and cleanup passed");
     return 0;
 }

@@ -8,13 +8,13 @@ from pathlib import Path
 from PIL import Image, ImageOps
 
 ROOT = Path(__file__).resolve().parents[1]
-NAMES = ('dark-blue', 'silver', 'violet', 'blue-waves')
+NAMES = ('dark-blue', 'violet', 'blue-waves')
 
 
 def prepare(inputs, output):
     output.mkdir(parents=True, exist_ok=True)
     provenance = []
-    for name, source, top in zip(NAMES, inputs, (0, 3, 12, 0)):
+    for name, source, top in zip(NAMES, inputs, (0, 12, 0)):
         with Image.open(source) as original:
             image = original.convert('RGB')
         bounds = (0, top, image.width, image.height)
@@ -34,7 +34,7 @@ def prepare(inputs, output):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('inputs', type=Path, nargs=4, metavar='PNG', help='Dark blue, silver, violet, blue waves, in order')
+    parser.add_argument('inputs', type=Path, nargs=3, metavar='PNG', help='Dark blue, violet, blue waves, in order')
     parser.add_argument('--output', type=Path, default=ROOT / 'assets/blueglass/wallpapers')
     args = parser.parse_args()
     prepare(args.inputs, args.output)

@@ -13,11 +13,10 @@
   alpha-trimmed header variants. Adapted Carbon
   artwork retains its upstream CC BY-NC-SA terms. Original SVGs and source console
   images are retained under `sources/`; exact revisions and URLs are in `provenance.json`.
-- **Selectable wallpapers**: four images supplied by the project owner for this change
-  (dark blue, silver, violet, and blue waves), replacing the former generated backgrounds.
+- **Selectable wallpapers**: three images supplied by the project owner for this change
+  (dark blue, violet, and blue waves), replacing the former generated backgrounds.
   Upstream authorship and licensing were not specified; no ownership or new license is claimed.
-  PlayStation marks belong to their respective owners. Processing removes top-edge remnants,
-  crops without distortion, and resizes to 960×544 with 240×136 thumbnails.
+  Processing removes top-edge remnants, crops without distortion, and resizes to 960×544 with 240×136 thumbnails.
   Source hashes and crop bounds are recorded in `wallpapers/provenance.json` (also bundled).
 - **RomM settings icon**: the previously accepted circular PNG from
   `assets/aurora/ui_icons/ui_romm.png`, restored byte-for-byte without recoloring.
