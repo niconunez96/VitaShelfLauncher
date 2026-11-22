@@ -427,6 +427,20 @@ static void settings_empty(const VpUiFrame *f,const char *symbol,const char *tit
     vp_ui_paragraph(f->font,VP_TYPE_PAGE_SUBTITLE,r.x+30,r.y+168,r.w-60,2,panel_muted,message);
 }
 
+static const char *connection_label(VpConnectionState state, bool images) {
+    switch (state) {
+        case VP_CONNECTION_UNCONFIGURED:return images?"Configura el host de tu servicio de imágenes.":"Ingresa tu API key de SteamGridDB.";
+        case VP_CONNECTION_NOT_CHECKED:return "Selecciona Probar conexión para verificar la configuración.";
+        case VP_CONNECTION_CHECKING:return "Comprobando la conexión...";
+        case VP_CONNECTION_CONNECTED:return "Conectado correctamente.";
+        case VP_CONNECTION_INVALID_KEY:return images?"El servicio rechazó la conexión. Revisa el host.":"API key inválida o sin permisos. Revisa la clave.";
+        case VP_CONNECTION_RATE_LIMITED:return "Límite de solicitudes alcanzado. Reintenta más tarde.";
+        case VP_CONNECTION_INVALID_RESPONSE:return "Respuesta no válida. Revisa el host y el servicio.";
+        case VP_CONNECTION_UNREACHABLE:return "No se pudo conectar. Revisa la red y reintenta.";
+    }
+    return "Sin datos de conexión.";
+}
+
 static void settings(const VpUiFrame *f) {
     static const char *names[]={"Integraciones","Descargas","Apariencia","Acerca de"};
     static const char *icons[]={"ui_server","ui_download","ui_interface","ui_info"};
@@ -488,12 +502,46 @@ static void settings(const VpUiFrame *f) {
         }
         return;
     }
-    if (section==VP_SETTINGS_INTEGRATIONS && !f->settings_romm) {
-        VpUiRect r=vp_ui_settings_row(0);
-        glass(r,true,false); icon("ui_romm",r.x+22,r.y+9,32);
-        text(f,VP_TYPE_SETTINGS_ROW,r.x+80,r.y+32,r.w-116,panel_primary,"RomM");
-        vita2d_draw_line(r.x+r.w-28,r.y+18,r.x+r.w-21,r.y+25,panel_primary);
-        vita2d_draw_line(r.x+r.w-21,r.y+25,r.x+r.w-28,r.y+32,panel_primary);
+    if (section==VP_SETTINGS_INTEGRATIONS && !f->settings_integration_open) {
+        static const char *integrations[]={"RomM","SteamGridDB","Image Service"};
+        static const char *symbols[]={"ui_romm","ui_library","ui_server"};
+        for (i=0;i<VP_INTEGRATION_COUNT;i++) {
+            VpUiRect r=vp_ui_settings_row((size_t)i);
+            glass(r,f->settings_integration==i,false); icon(symbols[i],r.x+22,r.y+9,32);
+            text(f,VP_TYPE_SETTINGS_ROW,r.x+80,r.y+32,r.w-116,panel_primary,integrations[i]);
+            vita2d_draw_line(r.x+r.w-28,r.y+18,r.x+r.w-21,r.y+25,panel_primary);
+            vita2d_draw_line(r.x+r.w-21,r.y+25,r.x+r.w-28,r.y+32,panel_primary);
+        }
+        return;
+    }
+    if (section==VP_SETTINGS_INTEGRATIONS && f->settings_integration!=VP_INTEGRATION_ROMM) {
+        bool images=f->settings_integration==VP_INTEGRATION_IMAGES;
+        int count=images?2:3;
+        char host[VP_URL], progress[96];
+        const char *configured=f->image_service_host?f->image_service_host:"";
+        const char *titles[]={images?"Host":"API key","Probar conexión","Sincronizar carátulas"};
+        const char *symbols[]={images?"ui_server":"ui_key","ui_sync","ui_folder"};
+        const char *values[3];
+        (void)snprintf(host,sizeof(host),"%s",configured);
+        if (strlen(host)>=6 && !strcmp(host+strlen(host)-6,"/image")) host[strlen(host)-6]=0;
+        values[0]=images?(host[0]?host:"X para configurar el host"):
+            (f->steamgrid_configured?"••••••••  ·  X para cambiar":"X para ingresar tu API key");
+        values[1]=images?"Verifica /health en tu servicio":"Verifica la API key y la conexión";
+        values[2]="Prepara imágenes para los juegos de Vita instalados";
+        text(f,VP_TYPE_LIST_TITLE,316,99,584,panel_primary,images?"Image Service":"SteamGridDB");
+        for (i=0;i<count;i++) {
+            VpUiRect r={310,112+i*72,600,62};
+            glass(r,f->settings_field==i,false); icon(symbols[i],r.x+12,r.y+13,30);
+            text(f,VP_TYPE_LIST_TITLE,r.x+58,r.y+24,528,panel_primary,titles[i]);
+            text(f,VP_TYPE_DESCRIPTION,r.x+58,r.y+48,528,panel_primary,values[i]);
+        }
+        (void)snprintf(progress,sizeof(progress),"Preparando carátulas: %u/%u listas",
+            (unsigned)f->covers_completed,(unsigned)f->covers_total);
+        vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,316,358,584,2,panel_muted,
+            !images && f->steamgrid_syncing?progress:connection_label(images?f->image_service_state:f->steamgrid_state,images));
+        vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,316,408,584,2,panel_muted,images?
+            "Servicio compartido por RomM y SteamGridDB. Las imágenes se guardan en la Vita.":
+            "Obtén tu API key en steamgriddb.com/profile/preferences/api. Configura también Image Service.");
         return;
     }
     if (section==VP_SETTINGS_INTEGRATIONS) {
@@ -565,7 +613,7 @@ static void button(int kind,int x,int y) {
 static void footer(const VpUiFrame *f) {
     bool roms=f->app->active_screen==VP_SCREEN_LIBRARY && f->app->library_level==VP_LEVEL_ROMS && f->visible_count;
     bool downloads=f->app->active_screen==VP_SCREEN_SETTINGS && f->settings_detail && f->settings_section==VP_SETTINGS_DOWNLOADS;
-    bool connection=f->app->active_screen==VP_SCREEN_SETTINGS && f->settings_detail && f->settings_romm && f->settings_section==VP_SETTINGS_INTEGRATIONS;
+    bool connection=f->app->active_screen==VP_SCREEN_SETTINGS && f->settings_detail && f->settings_integration_open && f->settings_integration==VP_INTEGRATION_ROMM && f->settings_section==VP_SETTINGS_INTEGRATIONS;
     const char *action=roms?"Descargar":"Abrir";
     VpUiRect r={24,492,912,42};
     round_rect(r.x-1,r.y-1,r.w+2,r.h+2,22,C(233,244,255,150));

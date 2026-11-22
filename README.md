@@ -76,6 +76,17 @@ The code is one-time use. Do not share the app configuration file: it contains t
 
 Settings are ordered as **Integrations**, **Downloads**, **Appearance**, and **About**. In **Appearance**, choose one of four wallpapers with the directional pad and `X`, or tap its thumbnail. **Text color** lets you pick white, light, dark, or black for better readability on light or dark wallpapers. **Animated wallpaper** toggles subtle movement; all appearance preferences save automatically. The ROM view picked with `Triangle` (grid, list, or carousel) is saved and restored on the next launch too. **About** shows the version, free space, and storage paths; when RomM is connected, it also shows the server, its catalog game count, and the last synchronization. A server without a synchronized catalog is identified explicitly rather than showing another server's data.
 
+### 3. Installed Vita games and covers
+
+Installed native Vita titles are discovered on startup and resume, and appear under **PS Vita** with the same grid, list, and carousel cards as RomM. Press `X` to launch a title directly. Local discovery and cached artwork work without RomM or an internet connection. The shared library holds up to 256 entries; local titles take priority and omitted titles are reported.
+
+For cover artwork, open **Settings → Integrations**:
+
+1. **Image Service**: enter the host of your [image service](services/imageproxy/README.md), such as `http://192.168.1.100:8090`, and select **Test connection** (`Probar conexión`). This service is shared by RomM and SteamGridDB; an existing `image_proxy_url` is still supported.
+2. **SteamGridDB**: enter your [API key](https://www.steamgriddb.com/profile/preferences/api), select **Test connection**, then **Sync covers** (`Sincronizar carátulas`). These settings save automatically. The key is masked in the settings page; keep your real configuration file private.
+
+Artwork is resized through the shared image service and cached on the Vita. Only unambiguous name matches are selected; missing or ambiguous artwork keeps the installed application's icon. For locally installed titles, successful matches are remembered by title ID.
+
 ## Development
 
 Human contributors: see [DEVELOPMENT.md](DEVELOPMENT.md). AI agents: begin with [agents.md](agents.md).

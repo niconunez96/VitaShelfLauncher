@@ -232,7 +232,8 @@ int main(int argc,char **argv) {
     const char *slugs[]={"arcade","dreamcast","gba","nds","gamecube","psx","psp","3ds","ps2","snes","genesis","wii"};
     const char *titles[]={"Bloody Roar II","Castlevania: Symphony of the Night","Crash Bandicoot","Gran Turismo","Metal Gear Solid",
         "Resident Evil","Silent Hill","Dino Crisis","Tomb Raider","Ridge Racer","A game with a very long title and accents: aventura fantástica","Another game"};
-    const char *cases[]={"platforms","carousel","list","grid","settings","integrations","downloads","downloads-empty","romm","about","about-disconnected","about-never-synced","store","empty","last-page","platforms-arcade","platforms-gba","platforms-last","appearance-dark","appearance-violet","appearance-waves","appearance-light-blue","appearance-text-dark"};
+    const char *cases[]={"platforms","carousel","list","grid","settings","integrations","downloads","downloads-empty","romm","about","about-disconnected","about-never-synced","store","empty","last-page","platforms-arcade","platforms-gba","platforms-last","appearance-dark","appearance-violet","appearance-waves","appearance-light-blue","appearance-text-dark",
+        "steamgrid-unconfigured","steamgrid-connected","steamgrid-invalid-key","steamgrid-progress","image-service-connected","image-service-unreachable"};
     size_t c,i;
     cr=cairo_create(canvas); assert(!FT_Init_FreeType(&freetype)); assert(vp_ui_fonts_load(&typefaces));
     assert(vp_ui_backdrop_init());
@@ -281,13 +282,15 @@ int main(int argc,char **argv) {
     }
     for (c=0;c<sizeof(cases)/sizeof(cases[0]);c++) {
         app.active_screen=VP_SCREEN_LIBRARY; app.library_level=VP_LEVEL_PLATFORMS; app.selected_platform=5; app.selected_item=0;
-        frame.group_count=12; frame.visible_count=12; frame.settings_detail=false; frame.settings_romm=false; queue.count=6;
+        frame.group_count=12; frame.visible_count=12; frame.settings_detail=false; frame.settings_integration_open=false; queue.count=6;
         frame.romm_catalog_available=true;
+        frame.settings_integration=VP_INTEGRATION_ROMM;
+        frame.steamgrid_syncing=false;
         if (c>=1 && c<=3) { app.library_level=VP_LEVEL_ROMS; app.active_view=c==1?VP_VIEW_CAROUSEL:(c==2?VP_VIEW_LIST:VP_VIEW_GRID); }
         if (c>=4 && c<=11) {
             app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=c!=4;
             frame.settings_section=c>=9?VP_SETTINGS_ABOUT:(c==6 || c==7?VP_SETTINGS_DOWNLOADS:VP_SETTINGS_INTEGRATIONS);
-            frame.settings_romm=c==8;
+            frame.settings_integration_open=c==8;
         }
         if (c==7) queue.count=0;
         if (c==11) frame.romm_catalog_available=false;
@@ -305,6 +308,16 @@ int main(int argc,char **argv) {
             frame.settings_section=VP_SETTINGS_APPEARANCE; frame.settings_field=VP_UI_APPEARANCE_TEXT_COLOR_SLOT;
             frame.preferences.wallpaper=3; frame.preferences.text_color=VP_UI_TEXT_COLOR_DARK; frame.preferences.animated=true;
         }
+        if (c>=23) {
+            app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=true;
+            frame.settings_section=VP_SETTINGS_INTEGRATIONS; frame.settings_integration_open=true;
+            frame.settings_integration=c>=27?VP_INTEGRATION_IMAGES:VP_INTEGRATION_STEAMGRID;
+            frame.settings_field=1; frame.steamgrid_configured=c!=23;
+            frame.steamgrid_state=c==23?VP_CONNECTION_UNCONFIGURED:(c==25?VP_CONNECTION_INVALID_KEY:VP_CONNECTION_CONNECTED);
+            frame.image_service_host="https://images.example.test/image";
+            frame.image_service_state=c==28?VP_CONNECTION_UNREACHABLE:VP_CONNECTION_CONNECTED;
+            frame.steamgrid_syncing=c==26; frame.covers_completed=3; frame.covers_total=8;
+        }
         (void)snprintf(app.active_platform,sizeof(app.active_platform),"psx");
         frame.romm_state=c==10?VP_ROMM_UNCONFIGURED:VP_ROMM_CONNECTED;
         for (i=0;i<10;i++) frame.covers[i]=covers[i];
@@ -315,15 +328,23 @@ int main(int argc,char **argv) {
             assert(integrations && downloads && about && integrations<downloads && downloads<about);
             assert(!strstr(frame_text,"General\n") && !strstr(frame_text,"Interfaz\n") && !strstr(frame_text,"Almacenamiento\n"));
         }
-        if (c==5) assert(strstr(frame_text,"RomM\n") && !strstr(frame_text,"Pair code\n"));
+        if (c==5) assert(strstr(frame_text,"RomM\n") && strstr(frame_text,"SteamGridDB\n") && strstr(frame_text,"Image Service\n") && !strstr(frame_text,"Pair code\n"));
         if (c==8) assert(strstr(frame_text,"URL del servidor\n") && strstr(frame_text,"Pair code\n") && strstr(frame_text,"Guardar\n"));
         if (c==7) assert(strstr(frame_text,"Todo al día\n"));
-        if (c>=18) {
+        if (c>=18 && c<=22) {
             for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) assert(strstr(frame_text,vp_ui_wallpaper((int)i)->label));
             assert(strstr(frame_text,"Color de texto\n"));
             assert(strstr(frame_text,"Fondo animado\n"));
             assert(strstr(frame_text,c==21?"Desactivado\n":"Activado\n"));
             assert(strstr(frame_text,c==22?"Oscuro\n":"Blanco\n"));
+        }
+        if (c>=23) {
+            assert(strstr(frame_text,"Probar conexión\n") && !strstr(frame_text,"Guardar\n"));
+            if (c<27) assert(strstr(frame_text,"API key\n") && strstr(frame_text,"Sincronizar carátulas\n") && !strstr(frame_text,"Host\n"));
+            else assert(strstr(frame_text,"Host\n") && !strstr(frame_text,"API key\n") && !strstr(frame_text,"Sincronizar carátulas\n"));
+            if (c==25) assert(strstr(frame_text,"API key inválida"));
+            if (c==26) assert(strstr(frame_text,"3/8 listas"));
+            if (c==28) assert(strstr(frame_text,"No se pudo conectar"));
         }
         if (c>=9 && c<=11) {
             assert(strstr(frame_text,"VitaShelf Launcher · 01.00\n"));
@@ -356,6 +377,6 @@ int main(int argc,char **argv) {
     vp_ui_fonts_free(&typefaces);
     assert(!textures && !fonts && drawn>0);
     cairo_destroy(cr); cairo_surface_destroy(canvas); FT_Done_FreeType(freetype);
-    puts("Blueglass renderer: 23 states, four wallpapers, text color presets, opaque console bodies, border-only focus, partial/missing assets, Inter metrics and cleanup passed");
+    puts("Blueglass renderer: 29 states, separate integrations, masked keys, progress, wallpapers, console materials, Inter metrics and cleanup passed");
     return 0;
 }

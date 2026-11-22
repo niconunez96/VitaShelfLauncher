@@ -4,6 +4,7 @@
 #include "vitashelflauncher.h"
 #include "ui_text.h"
 #include "ui_presentation.h"
+#include "integrations.h"
 
 /* Read-only presentation snapshot. All catalog actions remain in main/core. */
 typedef struct {
@@ -18,7 +19,13 @@ typedef struct {
     const VpDownloadQueue *downloads;
     size_t download_selection;
     int settings_section, settings_field;
-    bool settings_detail, settings_romm;
+    bool settings_detail, settings_integration_open;
+    int settings_integration;
+    bool steamgrid_configured;
+    const char *image_service_host;
+    VpConnectionState steamgrid_state, image_service_state;
+    bool steamgrid_syncing;
+    size_t covers_completed, covers_total;
     VpUiPreferences preferences;
     const char *app_version;
     bool romm_catalog_available;

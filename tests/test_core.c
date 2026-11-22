@@ -620,6 +620,11 @@ static void test_romm_sync(void) {
     (void)snprintf(item->download_url, sizeof(item->download_url), "https://cdn.example/fzero.sfc");
     assert(vp_queue_download(item, &config, "ux0:data/vitashelflauncher/downloads/fzero.sfc", transfer_backend));
     assert(strcmp(transfer_log.bearer, "") == 0);
+    item->source=VP_SOURCE_LOCAL;
+    config.base_url[0]='\0';
+    assert(vp_cache_cover(item,&config,"ux0:data/vitashelflauncher/cache/local.png",cover_transform_backend));
+    assert(cover_transform_log.bearer[0]=='\0');
+    assert(!strcmp(cover_transform_log.service_url,"http://romm.local:8090/image"));
 }
 
 static void test_libretro_thumbnail_safety(void) {

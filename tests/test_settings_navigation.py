@@ -9,6 +9,79 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class SettingsNavigationTests(unittest.TestCase):
+    def test_integration_input_saves_immediately_and_rolls_back(self):
+        source = (ROOT / "src/vita/main.c").read_text()
+
+        def body(signature):
+            start = source.index(signature)
+            return source[start:source.index("\n}", start) + 2]
+
+        prefix = r'''
+#include "vitashelflauncher.h"
+#include "integrations.h"
+#include "ui_presentation.h"
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+typedef uint16_t SceWChar16;
+typedef struct { int button; } SceImeDialogResult;
+enum { SCE_COMMON_DIALOG_STATUS_FINISHED=1, SCE_IME_DIALOG_BUTTON_ENTER=1 };
+static bool settings_ime_active,save_ok=true,romm_check_pending;
+static int settings_integration,settings_field,saves;
+static unsigned long integration_revision;
+static SceWChar16 settings_ime_buffer[VP_URL];
+static char steamgrid_api_key[VP_TEXT],romm_pair_code[VP_TEXT];
+static VpRommConfig romm_config;
+static VpRommConnection romm_connection;
+static VpConnectionState steamgrid_state,image_service_state;
+static bool save_romm_config(void) { saves++; return save_ok; }
+static int sceImeDialogGetStatus(void) { return SCE_COMMON_DIALOG_STATUS_FINISHED; }
+static int sceImeDialogGetResult(SceImeDialogResult *result) { result->button=SCE_IME_DIALOG_BUTTON_ENTER; return 0; }
+static int sceImeDialogTerm(void) { return 0; }
+static void show_notification(VpApp *app,const char *format,...) { (void)app;(void)format; }
+'''
+        suffix = r'''
+static void enter(VpApp *app,const char *value) {
+    size_t i;
+    for (i=0;value[i];i++) settings_ime_buffer[i]=(unsigned char)value[i];
+    settings_ime_buffer[i]=0; settings_ime_active=true;
+    settings_finish_ime(app);
+    assert(!settings_ime_active && !settings_ime_buffer[0]);
+}
+int main(void) {
+    static VpApp app;
+    settings_integration=VP_INTEGRATION_STEAMGRID;
+    enter(&app,"first-key");
+    assert(!strcmp(steamgrid_api_key,"first-key") && saves==1 && integration_revision==1);
+    assert(steamgrid_state==VP_CONNECTION_NOT_CHECKED);
+    save_ok=false;
+    enter(&app,"replacement-key");
+    assert(!strcmp(steamgrid_api_key,"first-key") && saves==2 && integration_revision==1);
+    save_ok=true;
+    settings_integration=VP_INTEGRATION_IMAGES;
+    enter(&app,"images.example:8090");
+    assert(!strcmp(romm_config.image_proxy_url,"http://images.example:8090/image") && saves==3);
+    enter(&app,"file:///tmp/image");
+    assert(!strcmp(romm_config.image_proxy_url,"http://images.example:8090/image") && saves==3);
+    enter(&app,"https://images.example/prefix/");
+    assert(!strcmp(romm_config.image_proxy_url,"https://images.example/prefix/image") && saves==4);
+    settings_integration=VP_INTEGRATION_STEAMGRID;
+    enter(&app,"");
+    assert(!steamgrid_api_key[0] && steamgrid_state==VP_CONNECTION_UNCONFIGURED && saves==5);
+    puts("Independent integration input, host normalization, immediate save and rollback: PASS");
+}
+'''
+        with tempfile.TemporaryDirectory(prefix="vitashelf-integration-input-") as temporary:
+            probe = pathlib.Path(temporary) / "input"
+            subprocess.run(
+                ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Iinclude", "-Isrc/vita",
+                 "-x", "c", "-", "src/core/vitashelflauncher.c", "src/core/integrations.c", "-o", str(probe)],
+                cwd=ROOT, input=prefix + body("static void trim(") + body("static void settings_wide_to_text(")
+                + body("static void settings_finish_ime(") + suffix, text=True, check=True,
+            )
+            subprocess.run([str(probe)], check=True, timeout=5)
+
     def test_appearance_round_trip_preserves_connections_and_failed_save(self):
         source = (ROOT / "src/vita/main.c").read_text()
 
@@ -19,6 +92,7 @@ class SettingsNavigationTests(unittest.TestCase):
         prefix = r'''
 #include "vitashelflauncher.h"
 #include "ui_presentation.h"
+#include "integrations.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -27,6 +101,7 @@ class SettingsNavigationTests(unittest.TestCase):
 static VpRommConfig romm_config;
 static VpHomebrewConfig homebrew_config;
 static VpLaunchConfig launch_config;
+static char steamgrid_api_key[VP_TEXT];
 static VpUiPreferences ui_preferences=VP_UI_PREFERENCES_DEFAULT;
 static VpApp app;
 static char active_theme[VP_TEXT]="default";
@@ -42,7 +117,7 @@ int main(void) {
     assert(file);
     fputs("romm_url=http://127.0.0.1:1\nromm_token=test-fixture\n"
           "image_proxy_url=http://127.0.0.1:2/image\nhomebrew_catalog=http://127.0.0.1:3/catalog\n"
-          "active_theme=default\nactive_view=list\nlaunch_psx=RETROVITA:pcsx_rearmed\n",file);
+          "steamgriddb_api_key=steamgrid-fixture\nactive_theme=default\nactive_view=list\nlaunch_psx=RETROVITA:pcsx_rearmed\n",file);
     assert(!fclose(file));
     vp_launch_config_init(&launch_config);
     load_providers(&app);
@@ -52,6 +127,7 @@ int main(void) {
     assert(vp_ui_preferences_set(&ui_preferences,"ui_text_color","dark"));
     assert(vp_ui_preferences_set(&ui_preferences,"ui_wallpaper_animated","0"));
     assert(save_romm_config());
+    memset(steamgrid_api_key,0,sizeof(steamgrid_api_key));
     memset(&romm_config,0,sizeof(romm_config));
     memset(&homebrew_config,0,sizeof(homebrew_config));
     vp_launch_config_init(&launch_config);
@@ -61,6 +137,7 @@ int main(void) {
     assert(app.active_view==VP_VIEW_LIST);
     assert(ui_preferences.wallpaper==1 && ui_preferences.text_color==VP_UI_TEXT_COLOR_DARK && !ui_preferences.animated);
     assert(!strcmp(romm_config.token,"test-fixture"));
+    assert(!strcmp(steamgrid_api_key,"steamgrid-fixture"));
     assert(!strcmp(romm_config.image_proxy_url,"http://127.0.0.1:2/image"));
     assert(!strcmp(homebrew_config.catalog_url,"http://127.0.0.1:3/catalog"));
     const VpLaunchProfile *profile=vp_launch_config_find(&launch_config,"psx");
@@ -94,7 +171,7 @@ int main(void) {
             subprocess.run(
                 ["cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror", "-pedantic",
                  "-Iinclude", "-Isrc/vita", "-x", "c", "-", "src/core/vitashelflauncher.c",
-                 "src/vita/ui_presentation.c", "-lm", "-o", str(probe)],
+                 "src/vita/ui_presentation.c", "src/core/integrations.c", "-lm", "-o", str(probe)],
                 cwd=ROOT, input=prefix + body("static void trim(") + body("static void load_providers(")
                 + body("static bool save_romm_config(") + suffix, text=True, check=True,
             )
@@ -117,10 +194,11 @@ int main(void) {
 enum { SCE_CTRL_UP=1, SCE_CTRL_DOWN=2, SCE_CTRL_CROSS=4, SCE_CTRL_CIRCLE=8,
        SCE_CTRL_SQUARE=16, SCE_CTRL_TRIANGLE=32, SCE_CTRL_LEFT=64, SCE_CTRL_RIGHT=128 };
 enum { VP_UI_SOUND_NAVIGATION, VP_UI_SOUND_ENTER, VP_UI_SOUND_BACK, VP_UI_SOUND_TAB,
-       VP_JOB_DOWNLOAD_ROM, VP_JOB_PAIR_AND_SYNC };
+       VP_JOB_DOWNLOAD_ROM, VP_JOB_PAIR_AND_SYNC, VP_JOB_CHECK_STEAMGRID, VP_JOB_CHECK_IMAGES };
 static int settings_section, settings_field, checks, syncs;
+static int settings_integration, last_job, artwork_syncs;
 static size_t download_selection;
-static bool settings_detail_active, settings_romm_active;
+static bool settings_detail_active, settings_integration_active;
 static bool settings_ime_active;
 static VpApp app;
 static size_t platform_group_count,visible_count_cache,visible_indexes[256];
@@ -150,10 +228,11 @@ static void show_notification(VpApp *app, const char *format, ...) { (void)app; 
 static bool start_next_download(void) { return false; }
 static bool sync_romm_catalog(VpApp *app) { (void)app; syncs++; return true; }
 static bool sync_cover_metadata(VpApp *app) { (void)app; return true; }
+static bool sync_steamgrid_artwork(VpApp *app) { (void)app; artwork_syncs++; return true; }
 static bool settings_start_ime(void) { return true; }
 static bool save_romm_config(void) { saves++; return save_ok; }
 static bool background_job_start(int kind, const void *a, const void *b, const void *c) {
-    (void)kind; (void)a; (void)b; (void)c; return true;
+    last_job=kind; (void)a; (void)b; (void)c; return true;
 }
 '''
         suffix = r'''
@@ -161,20 +240,42 @@ int main(void) {
     handle_settings_input(&app,SCE_CTRL_UP);
     assert(settings_section==VP_SETTINGS_INTEGRATIONS);
     handle_settings_input(&app,SCE_CTRL_CROSS);
-    assert(settings_detail_active && !settings_romm_active && checks==0);
+    assert(settings_detail_active && !settings_integration_active && checks==0);
     handle_settings_input(&app,SCE_CTRL_DOWN);
     assert(settings_field==0);
+    assert(settings_integration==VP_INTEGRATION_STEAMGRID);
+    handle_settings_input(&app,SCE_CTRL_UP);
     handle_settings_input(&app,SCE_CTRL_TRIANGLE);
-    assert(syncs==0 && !settings_romm_active);
+    assert(syncs==0 && !settings_integration_active);
     handle_settings_input(&app,SCE_CTRL_CROSS);
-    assert(settings_romm_active && checks==1);
+    assert(settings_integration_active && checks==1);
     handle_settings_input(&app,SCE_CTRL_DOWN);
     handle_settings_input(&app,SCE_CTRL_DOWN);
     assert(settings_field==2);
     handle_settings_input(&app,SCE_CTRL_CROSS);
     assert(syncs==1);
     handle_settings_input(&app,SCE_CTRL_CIRCLE);
-    assert(settings_detail_active && !settings_romm_active);
+    assert(settings_detail_active && !settings_integration_active);
+    handle_settings_input(&app,SCE_CTRL_DOWN);
+    handle_settings_input(&app,SCE_CTRL_CROSS);
+    assert(settings_integration_active && settings_integration==VP_INTEGRATION_STEAMGRID && last_job==VP_JOB_CHECK_STEAMGRID);
+    handle_settings_input(&app,SCE_CTRL_DOWN);
+    handle_settings_input(&app,SCE_CTRL_CROSS);
+    assert(settings_field==1 && last_job==VP_JOB_CHECK_STEAMGRID);
+    handle_settings_input(&app,SCE_CTRL_DOWN);
+    handle_settings_input(&app,SCE_CTRL_CROSS);
+    assert(artwork_syncs==1 && settings_field==2);
+    handle_settings_input(&app,SCE_CTRL_DOWN);
+    assert(settings_field==0);
+    handle_settings_input(&app,SCE_CTRL_CIRCLE);
+    handle_settings_input(&app,SCE_CTRL_DOWN);
+    handle_settings_input(&app,SCE_CTRL_CROSS);
+    assert(settings_integration==VP_INTEGRATION_IMAGES && last_job==VP_JOB_CHECK_IMAGES);
+    handle_settings_input(&app,SCE_CTRL_UP);
+    assert(settings_field==1);
+    handle_settings_input(&app,SCE_CTRL_CROSS);
+    assert(last_job==VP_JOB_CHECK_IMAGES && checks==1);
+    handle_settings_input(&app,SCE_CTRL_CIRCLE);
     handle_settings_input(&app,SCE_CTRL_CIRCLE);
     assert(!settings_detail_active);
     handle_settings_input(&app,SCE_CTRL_DOWN);
@@ -223,10 +324,24 @@ int main(void) {
     assert(settings_section==VP_SETTINGS_ABOUT);
     handle_settings_input(&app,SCE_CTRL_CROSS);
     handle_settings_input(&app,SCE_CTRL_TRIANGLE);
-    assert(settings_detail_active && !settings_romm_active && syncs==1 && checks==1);
+    assert(settings_detail_active && !settings_integration_active && syncs==1 && checks==1);
     handle_settings_input(&app,SCE_CTRL_CIRCLE);
     assert(!settings_detail_active);
     app.active_screen=VP_SCREEN_SETTINGS;
+    settings_section=VP_SETTINGS_INTEGRATIONS;
+    handle_settings_input(&app,SCE_CTRL_CROSS);
+    VpUiRect integration_row=vp_ui_settings_row(VP_INTEGRATION_STEAMGRID);
+    handle_settings_input(&app,touch_navigation_pressed(integration_row.x+1,integration_row.y+1));
+    assert(settings_integration==VP_INTEGRATION_STEAMGRID && settings_integration_active);
+    handle_settings_input(&app,touch_navigation_pressed(400,200));
+    assert(settings_field==1 && last_job==VP_JOB_CHECK_STEAMGRID);
+    handle_settings_input(&app,SCE_CTRL_CIRCLE);
+    integration_row=vp_ui_settings_row(VP_INTEGRATION_IMAGES);
+    handle_settings_input(&app,touch_navigation_pressed(integration_row.x+1,integration_row.y+1));
+    assert(settings_integration==VP_INTEGRATION_IMAGES && last_job==VP_JOB_CHECK_IMAGES);
+    assert(touch_navigation_pressed(400,270)==0); /* no third row on the image page */
+    handle_settings_input(&app,SCE_CTRL_CIRCLE);
+    handle_settings_input(&app,SCE_CTRL_CIRCLE);
     VpUiRect row=vp_ui_settings_row(VP_SETTINGS_APPEARANCE);
     handle_settings_input(&app,touch_navigation_pressed(row.x+1,row.y+1));
     assert(settings_detail_active && settings_section==VP_SETTINGS_APPEARANCE);

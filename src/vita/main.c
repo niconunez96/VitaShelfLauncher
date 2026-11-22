@@ -28,6 +28,8 @@
 #include "ui_backdrop.h"
 #include "catalog_cache.h"
 #include "vita_thread_priority.h"
+#include "local_library.h"
+#include "integrations.h"
 
 /* vitasdk 2026.08 omits these from SceAppMgrSystemEventType. The ABI values are
  * stable and are declared in newer vita-headers releases. */
@@ -43,6 +45,7 @@
 #define VP_CATALOG_CACHE_PATH "ux0:data/vitashelflauncher/catalog.cache"
 #define VP_CATALOG_CACHE_PARTIAL "ux0:data/vitashelflauncher/catalog.cache.part"
 #define VP_CATALOG_CACHE_VERSION 2U
+#define VP_ARTWORK_CACHE "ux0:data/vitashelflauncher/cache/covers"
 #define VP_TOUCH_WIDTH 1920
 #define VP_TOUCH_HEIGHT 1088
 #define VP_TOUCH_TAP_SLOP 32
@@ -59,7 +62,12 @@ static VpUiPreferences ui_preferences=VP_UI_PREFERENCES_DEFAULT;
 static int settings_field;
 static size_t download_selection;
 static bool settings_detail_active;
-static bool settings_romm_active;
+static bool settings_integration_active;
+static int settings_integration;
+static char steamgrid_api_key[VP_TEXT];
+static VpConnectionState steamgrid_state, image_service_state;
+static unsigned long integration_revision;
+static bool local_scan_pending=true;
 static char catalog_server[VP_URL];
 static char catalog_synced_at[32];
 static bool settings_ime_active;
@@ -73,7 +81,11 @@ typedef enum {
     VP_JOB_VALIDATE_ROMM,
     VP_JOB_DOWNLOAD_ROM,
     VP_JOB_INSTALL_HOMEBREW,
-    VP_JOB_SYNC_COVERS
+    VP_JOB_SYNC_COVERS,
+    VP_JOB_SCAN_LOCAL,
+    VP_JOB_CHECK_STEAMGRID,
+    VP_JOB_CHECK_IMAGES,
+    VP_JOB_SYNC_STEAMGRID
 } VpJobKind;
 
 typedef struct {
@@ -100,6 +112,11 @@ typedef struct {
     unsigned long romm_revision;
     VpRommConnectionState romm_state;
     bool token_exchanged;
+    char steamgrid_key[VP_TEXT];
+    unsigned long integration_revision;
+    VpConnectionState connection_state;
+    size_t omitted;
+    size_t covers_missing;
 } VpBackgroundJob;
 
 /* The core fetch buffer and backend diagnostics are deliberately single-owner. The background
@@ -117,6 +134,7 @@ static VpLibraryLevel cached_library_level;
 static char cached_platform[VP_TEXT];
 static bool catalog_view_cache_dirty = true;
 static bool cover_cache_dirty;
+static size_t catalog_omitted;
 
 static bool download_progress(unsigned long long downloaded, unsigned long long total, void *context);
 static void cover_path_for(const char *id, char *path, size_t capacity);
@@ -248,6 +266,10 @@ static void load_providers(VpApp *app) {
         else if (strcmp(line, "romm_token") == 0) (void)snprintf(romm_config.token, sizeof(romm_config.token), "%s", equals);
         else if (strcmp(line, "image_proxy_url") == 0)
             (void)snprintf(romm_config.image_proxy_url, sizeof(romm_config.image_proxy_url), "%s", equals);
+        else if (strcmp(line, "image_service_host") == 0)
+            (void)vp_image_service_endpoint(equals, "image", romm_config.image_proxy_url, sizeof(romm_config.image_proxy_url));
+        else if (strcmp(line, "steamgriddb_api_key") == 0)
+            (void)snprintf(steamgrid_api_key, sizeof(steamgrid_api_key), "%s", equals);
         else if (strcmp(line, "homebrew_catalog") == 0)
             (void)snprintf(homebrew_config.catalog_url, sizeof(homebrew_config.catalog_url), "%s", equals);
         else if (strcmp(line, "active_theme") == 0)
@@ -283,7 +305,8 @@ static bool save_romm_config(void) {
     if (file == NULL) return false;
     (void)fprintf(file, "romm_url=%s\nromm_token=%s\nimage_proxy_url=%s\nhomebrew_catalog=%s\nactive_theme=%s\n",
                    romm_config.base_url, romm_config.token, romm_config.image_proxy_url,
-                    homebrew_config.catalog_url, active_theme);
+                     homebrew_config.catalog_url, active_theme);
+    (void)fprintf(file, "steamgriddb_api_key=%s\n", steamgrid_api_key);
     (void)fprintf(file, "active_view=%s\n", vp_view_name(app.active_view));
     (void)fprintf(file, "ui_wallpaper=%s\nui_text_color=%s\nui_wallpaper_animated=%d\n",
                   vp_ui_wallpaper(ui_preferences.wallpaper)->id,
@@ -322,6 +345,16 @@ static bool file_exists(const char *path) {
     return true;
 }
 
+static bool cached_cover_valid(const char *path) {
+    unsigned char header[29];
+    FILE *file=fopen(path,"rb");
+    size_t size;
+    if (!file) return false;
+    size=fread(header,1,sizeof(header),file);
+    fclose(file);
+    return vp_safe_cover_png(header,size);
+}
+
 static void refresh_downloaded_items(VpApp *app) {
     size_t index;
     if (app == NULL) return;
@@ -342,19 +375,8 @@ static void refresh_downloaded_items(VpApp *app) {
 }
 
 static void apply_provider_catalog(VpApp *app, const VpCatalog *catalog) {
-    size_t index = 0;
     if (app == NULL || catalog == NULL) return;
-    while (index < app->catalog.count) {
-        if (app->catalog.items[index].source == VP_SOURCE_ROMM ||
-            app->catalog.items[index].source == VP_SOURCE_HOMEBREW) {
-            app->catalog.items[index] = app->catalog.items[app->catalog.count - 1];
-            app->catalog.count--;
-        } else {
-            index++;
-        }
-    }
-    for (index = 0; index < catalog->count; index++)
-        (void)vp_catalog_add(&app->catalog, &catalog->items[index]);
+    catalog_omitted=vp_catalog_replace_providers(&app->catalog,catalog);
     app->library_level = VP_LEVEL_PLATFORMS;
     app->active_platform[0] = '\0';
     app->selected_platform = 0;
@@ -469,6 +491,48 @@ static void *background_job_run(void *context) {
             job->covers_completed++;
             pthread_mutex_unlock(&job->mutex);
         }
+    } else if (kind == VP_JOB_SCAN_LOCAL) {
+        succeeded=vp_local_scan(&job->catalog,"ux0:app","ur0:appmeta",&job->omitted);
+        if (succeeded) for (size_t i=0;i<job->catalog.count;i++)
+            (void)vp_local_artwork_load(&job->catalog.items[i],VP_ARTWORK_CACHE);
+    } else if (kind == VP_JOB_CHECK_STEAMGRID || kind == VP_JOB_CHECK_IMAGES) {
+        VpRommProbeBackend backend={vp_vita_probe_service,NULL};
+        job->connection_state=kind==VP_JOB_CHECK_STEAMGRID?
+            vp_steamgrid_check(job->steamgrid_key,backend):vp_image_service_check(
+                config.image_proxy_url[0]?config.image_proxy_url:config.base_url,backend);
+        succeeded=job->connection_state==VP_CONNECTION_CONNECTED;
+    } else if (kind == VP_JOB_SYNC_STEAMGRID) {
+        VpRommProbeBackend backend={vp_vita_probe_service,NULL};
+        VpCoverTransformBackend transform={vp_vita_transform_cover,NULL};
+        succeeded=true;
+        job->connection_state=vp_steamgrid_check(job->steamgrid_key,backend);
+        if (job->connection_state!=VP_CONNECTION_CONNECTED) { succeeded=false; goto finish; }
+        for (size_t i=0;i<job->catalog.count;i++) {
+            VpItem *cover=&job->catalog.items[i];
+            char path[VP_PATH], temp[VP_PATH+8];
+            VpArtworkResult result;
+            if (cover->source!=VP_SOURCE_LOCAL || strcmp(cover->platform,"psvita")) continue;
+            cover_path_for(cover->id,path,sizeof(path));
+            if (cover->cover_url[0] && cached_cover_valid(path)) {
+                pthread_mutex_lock(&job->mutex);
+                job->covers_completed++;
+                pthread_mutex_unlock(&job->mutex);
+                continue;
+            }
+            result=vp_steamgrid_cover(cover,job->steamgrid_key,backend,&job->connection_state);
+            if (result==VP_ARTWORK_FAILED) { succeeded=false; break; }
+            if (result==VP_ARTWORK_NOT_FOUND) { job->covers_missing++; continue; }
+            (void)snprintf(temp,sizeof(temp),"%s.tmp",path);
+            if (vp_cache_cover(cover,&config,temp,transform)) {
+                (void)sceIoRemove(path);
+                if (sceIoRename(temp,path)>=0) {
+                    (void)vp_local_artwork_save(cover,VP_ARTWORK_CACHE);
+                    pthread_mutex_lock(&job->mutex);
+                    job->covers_completed++;
+                    pthread_mutex_unlock(&job->mutex);
+                } else { (void)sceIoRemove(temp); succeeded=false; }
+            } else { succeeded=false; break; }
+        }
     } else {
         VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
         const char *target = kind == VP_JOB_DOWNLOAD_ROM ? partial : destination;
@@ -520,6 +584,15 @@ static bool background_job_start(VpJobKind kind, const VpItem *item, const char 
     background_job.romm_revision = romm_connection.revision;
     background_job.romm_state = VP_ROMM_UNREACHABLE;
     background_job.token_exchanged = false;
+    background_job.connection_state=VP_CONNECTION_UNCONFIGURED;
+    background_job.integration_revision=integration_revision;
+    background_job.omitted=0;
+    background_job.covers_missing=0;
+    (void)snprintf(background_job.steamgrid_key,sizeof(background_job.steamgrid_key),"%s",steamgrid_api_key);
+    if (kind==VP_JOB_SYNC_STEAMGRID) background_job.catalog=app.catalog;
+    if (kind==VP_JOB_SYNC_STEAMGRID) for (size_t i=0;i<background_job.catalog.count;i++)
+        if (background_job.catalog.items[i].source==VP_SOURCE_LOCAL && !strcmp(background_job.catalog.items[i].platform,"psvita"))
+            background_job.covers_total++;
     background_job.homebrew = homebrew_config;
     (void)snprintf(background_job.pair_code, sizeof(background_job.pair_code), "%s", romm_pair_code);
     memset(&background_job.item, 0, sizeof(background_job.item));
@@ -538,6 +611,11 @@ static bool background_job_start(VpJobKind kind, const VpItem *item, const char 
                                 (romm_config.base_url[0] && romm_config.token[0])
                                     ? VP_ROMM_CHECKING : VP_ROMM_UNCONFIGURED;
         romm_check_pending = false;
+    }
+    if (result==0) {
+        if (kind==VP_JOB_SCAN_LOCAL) local_scan_pending=false;
+        if (kind==VP_JOB_CHECK_STEAMGRID || kind==VP_JOB_SYNC_STEAMGRID) steamgrid_state=VP_CONNECTION_CHECKING;
+        if (kind==VP_JOB_CHECK_IMAGES) image_service_state=VP_CONNECTION_CHECKING;
     }
     return result == 0;
 }
@@ -642,6 +720,47 @@ static void background_job_poll(VpApp *app) {
     background_job.kind = VP_JOB_NONE;
     pthread_mutex_unlock(&background_job.mutex);
 
+    if (kind==VP_JOB_SCAN_LOCAL) {
+        if (succeeded) {
+            for (size_t i=0;i<background_job.catalog.count;i++) {
+                VpItem *fresh=&background_job.catalog.items[i];
+                VpItem *previous=vp_catalog_find(&app->catalog,fresh->id);
+                if (previous) { fresh->favorite=previous->favorite; fresh->last_played=previous->last_played; }
+            }
+            if (vp_catalog_source_matches(&app->catalog,&background_job.catalog,VP_SOURCE_LOCAL)) {
+                (void)start_next_download();
+                return;
+            }
+            size_t omitted=background_job.omitted+vp_catalog_replace_source(&app->catalog,&background_job.catalog,VP_SOURCE_LOCAL);
+            app->library_level=VP_LEVEL_PLATFORMS;
+            app->selected_platform=0; app->selected_item=0; app->active_platform[0]=0;
+            catalog_view_cache_dirty=true; cover_cache_dirty=true;
+            if (omitted) show_notification(app,"Límite de biblioteca: %u juegos omitidos",(unsigned)omitted);
+        }
+        (void)start_next_download();
+        return;
+    }
+    if (kind==VP_JOB_CHECK_STEAMGRID || kind==VP_JOB_CHECK_IMAGES || kind==VP_JOB_SYNC_STEAMGRID) {
+        memset(background_job.steamgrid_key,0,sizeof(background_job.steamgrid_key));
+        if (background_job.integration_revision==integration_revision) {
+            if (kind==VP_JOB_CHECK_IMAGES) image_service_state=background_job.connection_state;
+            else steamgrid_state=background_job.connection_state;
+            if (kind==VP_JOB_SYNC_STEAMGRID) {
+                for (size_t i=0;i<background_job.catalog.count;i++) {
+                    const VpItem *updated=&background_job.catalog.items[i];
+                    VpItem *current=vp_catalog_find(&app->catalog,updated->id);
+                    if (updated->source!=VP_SOURCE_LOCAL || !current || strcmp(updated->title,current->title)) continue;
+                    (void)snprintf(current->cover_url,sizeof(current->cover_url),"%s",updated->cover_url);
+                    (void)snprintf(current->remote_id,sizeof(current->remote_id),"%s",updated->remote_id);
+                }
+                cover_cache_dirty=true;
+                show_notification(app,succeeded?"Carátulas listas: %u/%u (%u sin coincidencia)":"Sincronización detenida: %u/%u listas; revisa Integraciones",
+                    (unsigned)covers_completed,(unsigned)background_job.covers_total,(unsigned)background_job.covers_missing);
+            }
+        }
+        (void)start_next_download();
+        return;
+    }
     if (kind==VP_JOB_SYNC_COVERS) cover_cache_dirty=true;
     if (kind == VP_JOB_VALIDATE_ROMM || kind == VP_JOB_SYNC_PROVIDERS || kind == VP_JOB_PAIR_AND_SYNC) {
         /* URL edits invalidate in-flight authentication, pairing and catalog results. */
@@ -681,6 +800,7 @@ static void background_job_poll(VpApp *app) {
                     now.day,now.month,now.year,now.hour,now.minute);
         }
         show_notification(app, "Biblioteca sincronizada: %u juegos", (unsigned)app->catalog.count);
+        if (catalog_omitted) show_notification(app,"Límite de biblioteca: %u juegos remotos omitidos",(unsigned)catalog_omitted);
     } else if (kind == VP_JOB_SYNC_COVERS) {
         show_notification(app, "Metadata sincronizada: %u/%u caratulas",
                           (unsigned)covers_completed, (unsigned)covers_total);
@@ -725,6 +845,7 @@ static void background_job_poll(VpApp *app) {
         VpItem *completed = vp_catalog_find(&app->catalog, item.id);
         if (completed != NULL) completed->installed = true;
         show_notification(app, "Instalacion finalizada; revisa LiveArea");
+        local_scan_pending=true;
     }
     if (kind != VP_JOB_DOWNLOAD_ROM) (void)start_next_download();
 }
@@ -774,6 +895,14 @@ static bool sync_cover_metadata(VpApp *app) {
     return result == 0;
 }
 
+static bool sync_steamgrid_artwork(VpApp *app) {
+    char endpoint[VP_URL];
+    if (!app || !steamgrid_api_key[0] ||
+        !vp_image_service_endpoint(romm_config.image_proxy_url[0]?romm_config.image_proxy_url:romm_config.base_url,
+                                   "image",endpoint,sizeof(endpoint))) return false;
+    return background_job_start(VP_JOB_SYNC_STEAMGRID,NULL,NULL,NULL);
+}
+
 static void settings_text_to_wide(const char *source, SceWChar16 *destination, size_t capacity) {
     size_t index;
     for (index = 0; index + 1 < capacity && source[index] != '\0'; index++)
@@ -790,10 +919,23 @@ static void settings_wide_to_text(const SceWChar16 *source, char *destination, s
 
 static bool settings_start_ime(void) {
     SceImeDialogParam param;
+    char host[VP_URL];
     const char *value = settings_field == 0 ? romm_config.base_url : romm_pair_code;
     size_t capacity = settings_field == 0 ? sizeof(romm_config.base_url) : sizeof(romm_pair_code);
-    if (settings_field > 1) return false;
-    if (settings_field == 1 && !vp_romm_pair_code_enabled(romm_connection.state)) return false;
+    bool external=settings_integration!=VP_INTEGRATION_ROMM;
+    if (external) {
+        if (settings_field!=0) return false;
+        value=settings_integration==VP_INTEGRATION_STEAMGRID?steamgrid_api_key:romm_config.image_proxy_url;
+        capacity=settings_integration==VP_INTEGRATION_STEAMGRID?sizeof(steamgrid_api_key):sizeof(romm_config.image_proxy_url);
+        if (settings_integration==VP_INTEGRATION_IMAGES) {
+            (void)snprintf(host,sizeof(host),"%s",value);
+            if (strlen(host)>=6 && !strcmp(host+strlen(host)-6,"/image")) host[strlen(host)-6]=0;
+            value=host;
+        }
+    } else {
+        if (settings_field > 1) return false;
+        if (settings_field == 1 && !vp_romm_pair_code_enabled(romm_connection.state)) return false;
+    }
     settings_text_to_wide(value, settings_ime_buffer, sizeof(settings_ime_buffer) / sizeof(settings_ime_buffer[0]));
     sceImeDialogParamInit(&param);
     param.supportedLanguages = SCE_IME_LANGUAGE_ENGLISH | SCE_IME_LANGUAGE_SPANISH;
@@ -802,6 +944,11 @@ static bool settings_start_ime(void) {
     param.dialogMode = SCE_IME_DIALOG_DIALOG_MODE_WITH_CANCEL;
     param.textBoxMode = SCE_IME_DIALOG_TEXTBOX_MODE_DEFAULT;
     param.title = settings_field == 0 ? (const SceWChar16 *)u"URL de RomM" : (const SceWChar16 *)u"Pair code de RomM";
+    if (external) {
+        param.type=settings_integration==VP_INTEGRATION_STEAMGRID?SCE_IME_TYPE_BASIC_LATIN:SCE_IME_TYPE_URL;
+        param.title=settings_integration==VP_INTEGRATION_STEAMGRID?
+            (const SceWChar16 *)u"SteamGridDB API key":(const SceWChar16 *)u"Image Service host";
+    }
     param.maxTextLength = (SceUInt32)(capacity - 1);
     param.initialText = settings_ime_buffer;
     param.inputTextBuffer = settings_ime_buffer;
@@ -816,6 +963,32 @@ static void settings_finish_ime(VpApp *app) {
     memset(&result, 0, sizeof(result));
     (void)sceImeDialogGetResult(&result);
     if (result.button == SCE_IME_DIALOG_BUTTON_ENTER) {
+        if (settings_integration!=VP_INTEGRATION_ROMM) {
+            char candidate[VP_URL], previous[VP_URL], endpoint[VP_URL];
+            char *value=settings_integration==VP_INTEGRATION_STEAMGRID?steamgrid_api_key:romm_config.image_proxy_url;
+            size_t capacity=settings_integration==VP_INTEGRATION_STEAMGRID?sizeof(steamgrid_api_key):sizeof(romm_config.image_proxy_url);
+            settings_wide_to_text(settings_ime_buffer,candidate,sizeof(candidate));
+            trim(candidate);
+            (void)snprintf(previous,sizeof(previous),"%s",value);
+            if (strpbrk(candidate,"\r\n") || strlen(candidate)>=capacity ||
+                (settings_integration==VP_INTEGRATION_IMAGES && candidate[0] &&
+                 !vp_image_service_endpoint(candidate,"image",endpoint,sizeof(endpoint)))) {
+                show_notification(app,"Valor inválido; usa un host HTTP(S) para Image Service");
+            } else {
+                (void)snprintf(value,capacity,"%s",settings_integration==VP_INTEGRATION_IMAGES && candidate[0]?endpoint:candidate);
+                if (!save_romm_config()) {
+                    (void)snprintf(value,capacity,"%s",previous);
+                    show_notification(app,"No se pudo guardar la configuración");
+                } else {
+                    integration_revision++;
+                    steamgrid_state=steamgrid_api_key[0]?VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
+                    image_service_state=romm_config.image_proxy_url[0]?VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
+                    show_notification(app,"Configuración guardada; selecciona Probar conexión");
+                }
+            }
+            memset(candidate,0,sizeof(candidate)); memset(previous,0,sizeof(previous));
+            goto ime_finished;
+        }
         char *value = settings_field == 0 ? romm_config.base_url : romm_pair_code;
         size_t capacity = settings_field == 0 ? sizeof(romm_config.base_url) : sizeof(romm_pair_code);
         char previous[VP_URL];
@@ -825,11 +998,18 @@ static void settings_finish_ime(VpApp *app) {
             vp_romm_connection_reset(&romm_connection, &romm_config);
             romm_check_pending = romm_connection.state == VP_ROMM_CHECKING;
             memset(romm_pair_code, 0, sizeof(romm_pair_code));
+            if (!romm_config.image_proxy_url[0]) {
+                integration_revision++;
+                image_service_state=romm_config.base_url[0]?VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
+                steamgrid_state=steamgrid_api_key[0]?VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
+            }
         }
         (void)snprintf(app->notice, sizeof(app->notice), "%s actualizado; Triangulo guarda y sincroniza",
                        settings_field == 0 ? "URL" : "Pair code");
     }
+ime_finished:
     (void)sceImeDialogTerm();
+    memset(settings_ime_buffer,0,sizeof(settings_ime_buffer));
     settings_ime_active = false;
 }
 
@@ -851,7 +1031,7 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
         return;
     }
     if (pressed & SCE_CTRL_CIRCLE) {
-        if (settings_romm_active) settings_romm_active = false;
+        if (settings_integration_active) settings_integration_active = false;
         else settings_detail_active = false;
         vp_ui_audio_play(VP_UI_SOUND_BACK);
         return;
@@ -955,11 +1135,33 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
         return;
     }
     if (settings_section != VP_SETTINGS_INTEGRATIONS) return;
-    if (!settings_romm_active) {
+    if (!settings_integration_active) {
+        if (pressed & SCE_CTRL_UP) settings_integration=(settings_integration+VP_INTEGRATION_COUNT-1)%VP_INTEGRATION_COUNT;
+        if (pressed & SCE_CTRL_DOWN) settings_integration=(settings_integration+1)%VP_INTEGRATION_COUNT;
         if (pressed & SCE_CTRL_CROSS) {
-            settings_romm_active = true;
-            request_romm_check();
+            settings_integration_active = true;
+            settings_field=0;
+            if (settings_integration==VP_INTEGRATION_ROMM) request_romm_check();
+            else (void)background_job_start(settings_integration==VP_INTEGRATION_STEAMGRID?
+                VP_JOB_CHECK_STEAMGRID:VP_JOB_CHECK_IMAGES,NULL,NULL,NULL);
             vp_ui_audio_play(VP_UI_SOUND_ENTER);
+        }
+        return;
+    }
+    if (settings_integration!=VP_INTEGRATION_ROMM) {
+        int count=settings_integration==VP_INTEGRATION_STEAMGRID?3:2;
+        if (pressed & SCE_CTRL_UP) { settings_field=(settings_field+count-1)%count; vp_ui_audio_play(VP_UI_SOUND_NAVIGATION); }
+        if (pressed & SCE_CTRL_DOWN) { settings_field=(settings_field+1)%count; vp_ui_audio_play(VP_UI_SOUND_NAVIGATION); }
+        if (pressed & SCE_CTRL_CROSS) {
+            if (settings_field==0) {
+                if (!settings_start_ime()) show_notification(app,"No se pudo abrir el teclado de PS Vita");
+            } else if (settings_field==1) {
+                if (!background_job_start(settings_integration==VP_INTEGRATION_STEAMGRID?
+                    VP_JOB_CHECK_STEAMGRID:VP_JOB_CHECK_IMAGES,NULL,NULL,NULL))
+                    show_notification(app,"Hay una operación en curso; reintenta en unos instantes");
+            } else if (!sync_steamgrid_artwork(app)) {
+                show_notification(app,"Configura la API key de SteamGridDB y el host de Image Service");
+            }
         }
         return;
     }
@@ -1143,7 +1345,9 @@ static vita2d_texture *load_texture_file(const char *id, const char *path) {
     }
     read_count = fread(header, 1, sizeof(header), file);
     fclose(file);
-    if (!vp_safe_cover_png(header, read_count)) {
+    if (!vp_safe_cover_png(header, read_count) &&
+        !((!strncmp(path,"ux0:app/",8) || !strncmp(path,"ur0:appmeta/",12)) &&
+          vp_safe_vita_icon_png(header,read_count))) {
         record_cover_event("load-header-rejected", id, path);
         return NULL;
     }
@@ -1283,7 +1487,7 @@ static void cover_decode_collect(void) {
         return;
     }
     if (texture != NULL) vita2d_free_texture(texture);
-    else if (path[0] != '\0') (void)sceIoRemove(path);
+    else if (!strncmp(path,VP_ARTWORK_CACHE "/",strlen(VP_ARTWORK_CACHE "/"))) (void)sceIoRemove(path);
 }
 
 static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
@@ -1295,7 +1499,7 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
         VpCoverSlot *slot;
         char path[VP_PATH];
         SceUID cover_fd;
-        if (item->cover_url[0] == '\0') continue;
+        if (item->cover_url[0] == '\0' && item->source!=VP_SOURCE_LOCAL) continue;
         if (find_cover_slot(item->id) != NULL) continue;
         cover_path_for(item->id, path, sizeof(path));
         /* Probe through Vita I/O without opening a stdio stream just to check
@@ -1305,6 +1509,10 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
             char safe[VP_TEXT];
             safe_id(item->id,safe,sizeof(safe));
             (void)snprintf(path,sizeof(path),"ux0:data/vitashelflauncher/cache/covers/processed-%s.png",safe);
+            cover_fd=sceIoOpen(path,SCE_O_RDONLY,0);
+        }
+        if (cover_fd<0 && item->source==VP_SOURCE_LOCAL && item->fs_name[0]) {
+            (void)snprintf(path,sizeof(path),"%s",item->fs_name);
             cover_fd=sceIoOpen(path,SCE_O_RDONLY,0);
         }
         if (cover_fd < 0) continue;
@@ -1368,6 +1576,13 @@ static void activate_selected(VpApp *app) {
         return;
     }
     if (item->installed && item->launch_target[0] != '\0') {
+        if (item->source==VP_SOURCE_LOCAL && !strcmp(item->platform,"psvita")) {
+            char uri[VP_LAUNCH_URI];
+            if (!vp_vita_title_launch_uri(item,uri,sizeof(uri)) || !vp_vita_launch_uri(uri))
+                show_notification(app,"No se pudo abrir %.100s; verifica que sigue instalado",item->title);
+            else sceKernelExitProcess(0);
+            return;
+        }
         const VpLaunchProfile *profile = vp_launch_config_find(&launch_config, item->platform);
         char uri[VP_LAUNCH_URI];
         if (profile == NULL) {
@@ -1521,7 +1736,12 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
     frame->settings_section = settings_section; frame->settings_field = settings_field;
     frame->preferences = ui_preferences;
     frame->settings_detail = settings_detail_active;
-    frame->settings_romm = settings_romm_active;
+    frame->settings_integration_open = settings_integration_active;
+    frame->settings_integration=settings_integration;
+    frame->steamgrid_configured=steamgrid_api_key[0]!=0;
+    frame->image_service_host=romm_config.image_proxy_url[0]?romm_config.image_proxy_url:romm_config.base_url;
+    frame->steamgrid_state=steamgrid_state;
+    frame->image_service_state=image_service_state;
     frame->app_version = VP_APP_VERSION;
     frame->romm_catalog_available = catalog_server[0] && !strcmp(catalog_server,romm_config.base_url);
     (void)snprintf(frame->romm_last_sync,sizeof(frame->romm_last_sync),"%s",
@@ -1562,6 +1782,9 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
     }
     pthread_mutex_lock(&background_job.mutex);
     frame->busy = background_job.active;
+    frame->steamgrid_syncing=background_job.active && background_job.kind==VP_JOB_SYNC_STEAMGRID;
+    frame->covers_completed=background_job.covers_completed;
+    frame->covers_total=background_job.covers_total;
     pthread_mutex_unlock(&background_job.mutex);
     vp_ui_prepare(frame);
 }
@@ -1622,7 +1845,7 @@ static unsigned int touch_navigation_pressed(int x, int y) {
     if (y>=492 && y<534 && x>=350 && x<595) return SCE_CTRL_CROSS;
     if (settings_detail_active && settings_section==VP_SETTINGS_DOWNLOADS && y>=492 && y<534 && x>=700 && x<804) return SCE_CTRL_SQUARE;
     if (settings_detail_active && vp_ui_touch_back(x, y)) return SCE_CTRL_CIRCLE;
-    if (vp_ui_touch_view_toggle(x,y) && settings_detail_active && settings_romm_active && settings_section==VP_SETTINGS_INTEGRATIONS) return SCE_CTRL_TRIANGLE;
+    if (vp_ui_touch_view_toggle(x,y) && settings_detail_active && settings_integration_active && settings_integration==VP_INTEGRATION_ROMM && settings_section==VP_SETTINGS_INTEGRATIONS) return SCE_CTRL_TRIANGLE;
     if (!settings_detail_active) {
         slot=vp_ui_touch_settings_slot(x,y);
         if (slot>=0) { settings_section=slot; return SCE_CTRL_CROSS; }
@@ -1631,10 +1854,12 @@ static unsigned int touch_navigation_pressed(int x, int y) {
     if (settings_section == VP_SETTINGS_APPEARANCE) {
         slot=vp_ui_touch_appearance_slot(x,y);
         if (slot>=0) { settings_field=slot; return SCE_CTRL_CROSS; }
-    } else if (settings_section == VP_SETTINGS_INTEGRATIONS && !settings_romm_active) {
-        if (vp_ui_touch_settings_slot(x,y)==0) return SCE_CTRL_CROSS;
+    } else if (settings_section == VP_SETTINGS_INTEGRATIONS && !settings_integration_active) {
+        slot=vp_ui_touch_settings_slot(x,y);
+        if (slot>=0 && slot<VP_INTEGRATION_COUNT) { settings_integration=slot; return SCE_CTRL_CROSS; }
     } else if (settings_section == VP_SETTINGS_INTEGRATIONS) {
-        for (slot = 0; slot < 4; slot++) {
+        int count=settings_integration==VP_INTEGRATION_ROMM?4:(settings_integration==VP_INTEGRATION_STEAMGRID?3:2);
+        for (slot = 0; slot < count; slot++) {
             int row_y = 112 + slot * 72;
             if (x >= 310 && x < 910 && y >= row_y && y < row_y + 62) {
                 settings_field = slot;
@@ -1686,6 +1911,7 @@ static void handle_app_events(VpApp *app, bool *quit) {
             (void)pause_active_download(app, false);
             break;
         case SCE_APPMGR_SYSTEMEVENT_ON_RESUME: {
+            local_scan_pending=true;
             size_t index;
             bool paused = false;
             for (index = 0; index < download_queue.count; index++) {
@@ -1732,6 +1958,9 @@ int main(void) {
     (void)sceIoMkdir("ux0:data/vitashelflauncher/cache/covers", 0777);
     (void)sceIoMkdir("ux0:data/vitashelflauncher/downloads", 0777);
     load_providers(&app);
+    steamgrid_state=steamgrid_api_key[0]?VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
+    image_service_state=romm_config.image_proxy_url[0] || romm_config.base_url[0]?
+        VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
     request_romm_check();
     (void)load_catalog_cache(&app, &romm_config);
     refresh_downloaded_items(&app);
@@ -1757,6 +1986,8 @@ int main(void) {
         handle_app_events(&app, &request_quit);
         if (request_quit) break;
         background_job_poll(&app);
+        if (local_scan_pending)
+            (void)background_job_start(VP_JOB_SCAN_LOCAL,NULL,NULL,NULL);
         if (romm_check_pending)
             (void)background_job_start(VP_JOB_VALIDATE_ROMM, NULL, NULL, NULL);
         sceCtrlPeekBufferPositive(0, &pad, 1);

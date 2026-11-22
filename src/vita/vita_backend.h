@@ -10,6 +10,8 @@ bool vp_vita_fetch(const char *url, const char *bearer_token,
                    char *response, size_t response_capacity, void *context);
 long vp_vita_probe_romm(const char *url, const char *bearer_token,
                         char *response, size_t response_capacity, void *context);
+long vp_vita_probe_service(const char *url, const char *bearer_token,
+                           char *response, size_t response_capacity, void *context);
 const char *vp_vita_last_error(void);
 bool vp_vita_exchange_pair_code(const char *url, const char *code,
                                 char *response, size_t response_capacity, void *context);

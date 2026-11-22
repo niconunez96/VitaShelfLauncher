@@ -77,6 +77,7 @@ enum { SCE_APPMGR_SYSTEMEVENT_ON_DEACTIVATE = 1,
        SCE_APPMGR_SYSTEMEVENT_REQUEST_QUIT = 3 };
 static struct { size_t count; VpDownloadEntry entries[1]; } download_queue;
 static int scenario, polls, pauses, exit_pauses;
+static bool local_scan_pending;
 static int sceAppMgrReceiveSystemEvent(SceAppMgrSystemEvent *event) {
     polls++;
     if (scenario == 0) return -1;
@@ -113,6 +114,7 @@ int main(int argc, char **argv) {
     download_queue.count = 1;
     download_queue.entries[0].state = VP_DOWNLOAD_PAUSED;
     handle_app_events(&app, &quit);
+    if (scenario==3 && !local_scan_pending) return 2;
     printf("%d|%d|%d|%d|%s", polls, pauses, exit_pauses, quit, app.notice);
     return 0;
 }

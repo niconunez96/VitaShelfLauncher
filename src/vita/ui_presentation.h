@@ -29,6 +29,12 @@ typedef enum {
     VP_SETTINGS_ABOUT,
     VP_SETTINGS_COUNT
 } VpSettingsSection;
+typedef enum {
+    VP_INTEGRATION_ROMM,
+    VP_INTEGRATION_STEAMGRID,
+    VP_INTEGRATION_IMAGES,
+    VP_INTEGRATION_COUNT
+} VpIntegration;
 #define VP_UI_GRID_PAGE 10
 #define VP_UI_LIST_PAGE 5
 #define VP_UI_CONSOLE_PAGE 6

@@ -286,15 +286,14 @@ static bool promote_vpk(const char *vpk_path) {
     return result == 0;
 }
 
-long vp_vita_probe_romm(const char *url, const char *bearer_token,
-                        char *response, size_t response_capacity, void *context) {
+static long probe_http(const char *url, const char *bearer_token,
+                        char *response, size_t response_capacity, bool diagnostics) {
     CURL *curl;
     struct curl_slist *headers = NULL;
     ResponseBuffer buffer;
     char authorization[VP_TEXT + 32];
     CURLcode result;
     long status = 0;
-    (void)context;
     if (url == NULL || response == NULL || response_capacity == 0 || !valid_bearer_token(bearer_token)) return false;
     response[0] = '\0';
     buffer.buffer = response;
@@ -323,11 +322,23 @@ long vp_vita_probe_romm(const char *url, const char *bearer_token,
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
     result = curl_easy_perform(curl);
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-    set_last_error(result, status, response, buffer.truncated);
-    record_http_failure(url, result, status, response, buffer.truncated);
+    set_last_error(result, status, diagnostics?response:NULL, buffer.truncated);
+    if (diagnostics) record_http_failure(url, result, status, response, buffer.truncated);
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     return result == CURLE_OK && !buffer.truncated ? status : 0;
+}
+
+long vp_vita_probe_romm(const char *url, const char *bearer_token,
+                        char *response, size_t capacity, void *context) {
+    (void)context;
+    return probe_http(url,bearer_token,response,capacity,true);
+}
+
+long vp_vita_probe_service(const char *url, const char *bearer_token,
+                           char *response, size_t capacity, void *context) {
+    (void)context;
+    return probe_http(url,bearer_token,response,capacity,false);
 }
 
 bool vp_vita_fetch(const char *url, const char *bearer_token,

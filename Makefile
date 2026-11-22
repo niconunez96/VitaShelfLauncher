@@ -1,12 +1,26 @@
 CC ?= gcc
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -pedantic -Iinclude
-CORE = src/core/vitashelflauncher.c
+CORE = src/core/vitashelflauncher.c src/core/vita_titles.c src/core/integrations.c
 TEST = build/test_core
 
-.PHONY: test test-ui test-vita-lifecycle test-assets test-renderer test-release-automation clean
+.PHONY: test test-integrations test-local-library test-ui test-vita-lifecycle test-assets test-renderer test-release-automation clean
 
-test: $(TEST) test-ui test-vita-lifecycle test-release-automation
+test: $(TEST) test-integrations test-local-library test-ui test-vita-lifecycle test-release-automation
 	$(TEST)
+
+test-integrations: build/test_integrations
+	build/test_integrations
+
+build/test_integrations: src/core/integrations.c tests/test_integrations.c include/integrations.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) src/core/integrations.c tests/test_integrations.c -o $@
+
+test-local-library: build/test_local_library
+	build/test_local_library
+
+build/test_local_library: src/core/vita_titles.c src/core/vitashelflauncher.c src/vita/local_library.c tests/test_local_library.c include/vita_titles.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -Isrc/vita src/core/vitashelflauncher.c src/core/vita_titles.c src/vita/local_library.c tests/test_local_library.c -o $@
 
 test-release-automation:
 	python3 tests/test_release_automation.py
@@ -23,6 +37,7 @@ test-vita-lifecycle:
 	python3 tests/test_download_lifecycle.py
 	python3 tests/test_vita_thread_priority.py
 	python3 tests/test_romm_worker.py
+	python3 tests/test_artwork_worker.py
 	python3 tests/test_settings_navigation.py
 
 build/test_presentation: src/vita/ui_presentation.c src/vita/ui_presentation.h tests/test_presentation.c
