@@ -21,6 +21,7 @@ static unsigned long long clock_us=1000000;
 static size_t textures,fonts,drawn;
 static bool missing;
 static char last_text[768];
+static char frame_text[16384];
 static _Alignas(16) unsigned char pool[1024*1024];
 static size_t pool_used;
 static void source(unsigned int c);
@@ -122,14 +123,17 @@ int vita2d_font_draw_text(vita2d_font *font,int x,int y,unsigned int color,unsig
     }
     source(color); cairo_move_to(cr,x,y); cairo_show_text(cr,s);
     assert(cairo_status(cr)==CAIRO_STATUS_SUCCESS);
-    (void)snprintf(last_text,sizeof(last_text),"%s",s); drawn++; return width;
+    (void)snprintf(last_text,sizeof(last_text),"%s",s);
+    assert(strlen(frame_text)+strlen(s)+2<sizeof(frame_text));
+    strcat(frame_text,s); strcat(frame_text,"\n");
+    drawn++; return width;
 }
 
 static void settle(VpUiFrame *frame) {
     size_t i;
     for (i=0;i<45;i++) {
         struct timespec pause={0,2000000};
-        pool_used=0; vp_ui_prepare(frame); vp_ui_render(frame); nanosleep(&pause,NULL);
+        pool_used=0; frame_text[0]='\0'; vp_ui_prepare(frame); vp_ui_render(frame); nanosleep(&pause,NULL);
     }
 }
 
@@ -145,7 +149,7 @@ int main(int argc,char **argv) {
     const char *slugs[]={"arcade","dreamcast","gba","nds","gamecube","psx","psp","3ds","ps2","snes","genesis","wii"};
     const char *titles[]={"Bloody Roar II","Castlevania: Symphony of the Night","Crash Bandicoot","Gran Turismo","Metal Gear Solid",
         "Resident Evil","Silent Hill","Dino Crisis","Tomb Raider","Ridge Racer","A game with a very long title and accents: aventura fantástica","Another game"};
-    const char *cases[]={"platforms","carousel","list","grid","settings","general","interface","downloads","downloads-empty","romm","storage","about","store","empty","last-page","platforms-arcade","platforms-gba","platforms-last"};
+    const char *cases[]={"platforms","carousel","list","grid","settings","integrations","downloads","downloads-empty","romm","about","about-disconnected","about-never-synced","store","empty","last-page","platforms-arcade","platforms-gba","platforms-last"};
     size_t c,i;
     cr=cairo_create(canvas); assert(!FT_Init_FreeType(&freetype)); assert(vp_ui_fonts_load(&typefaces));
     assert(vp_ui_backdrop_init());
@@ -158,6 +162,7 @@ int main(int argc,char **argv) {
         (void)snprintf(item.platform,sizeof(item.platform),"psx");
         (void)snprintf(item.platform_display,sizeof(item.platform_display),"PlayStation");
         (void)snprintf(item.description,sizeof(item.description),"Bloody Roar is back with this sequel. Among the new and improved features are several new characters, new stages and enhanced 3D graphics.");
+        item.source=i<6?VP_SOURCE_ROMM:VP_SOURCE_LOCAL;
         item.installed=i%2==0; item.favorite=i==0; vp_catalog_add(&app.catalog,&item); visible[i]=i;
     }
     for (i=0;i<12;i++) {
@@ -169,6 +174,9 @@ int main(int argc,char **argv) {
     frame.app=&app; frame.font=&typefaces; frame.groups=groups; frame.group_count=12;
     frame.visible=visible; frame.visible_count=12; frame.downloads=&queue;
     frame.active_theme="default"; frame.romm_url="https://romm.example.test"; frame.pair_code="";
+    frame.app_version="01.00"; frame.romm_catalog_available=true;
+    (void)snprintf(frame.romm_last_sync,sizeof(frame.romm_last_sync),"21/11/2026 18:24");
+    frame.storage_free=12ULL*1073741824; frame.storage_total=32ULL*1073741824;
     (void)snprintf(frame.date,sizeof(frame.date),"19 Nov"); (void)snprintf(frame.time,sizeof(frame.time),"18:24");
     frame.battery_percent=92;
     if (argc>2) for (i=0;i<10;i++) {
@@ -189,19 +197,50 @@ int main(int argc,char **argv) {
     }
     for (c=0;c<sizeof(cases)/sizeof(cases[0]);c++) {
         app.active_screen=VP_SCREEN_LIBRARY; app.library_level=VP_LEVEL_PLATFORMS; app.selected_platform=5; app.selected_item=0;
-        frame.group_count=12; frame.visible_count=12; frame.settings_detail=false; queue.count=6;
+        frame.group_count=12; frame.visible_count=12; frame.settings_detail=false; frame.settings_romm=false; queue.count=6;
+        frame.romm_catalog_available=true;
         if (c>=1 && c<=3) { app.library_level=VP_LEVEL_ROMS; app.active_view=c==1?VP_VIEW_CAROUSEL:(c==2?VP_VIEW_LIST:VP_VIEW_GRID); }
-        if (c>=4 && c<=11) { app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=c!=4; frame.settings_section=c==4?0:(int)c-5-(c>=8?1:0); }
-        if (c==8) queue.count=0;
+        if (c>=4 && c<=11) {
+            app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=c!=4;
+            frame.settings_section=c>=9?VP_SETTINGS_ABOUT:(c==6 || c==7?VP_SETTINGS_DOWNLOADS:VP_SETTINGS_INTEGRATIONS);
+            frame.settings_romm=c==8;
+        }
+        if (c==7) queue.count=0;
+        if (c==11) frame.romm_catalog_available=false;
         if (c==12) app.active_screen=VP_SCREEN_STORES;
         if (c==13) frame.group_count=0;
         if (c==14) { app.library_level=VP_LEVEL_ROMS; app.active_view=VP_VIEW_GRID; app.selected_item=11; }
         if (c>=15) app.selected_platform=c==15?0:(c==16?2:11);
         (void)snprintf(app.active_platform,sizeof(app.active_platform),"psx");
-        frame.romm_state=VP_ROMM_CONNECTED;
+        frame.romm_state=c==10?VP_ROMM_UNCONFIGURED:VP_ROMM_CONNECTED;
         for (i=0;i<10;i++) frame.covers[i]=covers[i];
         if (app.active_view==VP_VIEW_CAROUSEL) for (i=0;i<7;i++) frame.covers[i]=covers[(i+7)%10];
         before=app; settle(&frame); assert(!memcmp(&app,&before,sizeof(app)));
+        if (c==4) {
+            const char *integrations=strstr(frame_text,"Integraciones\n"),*downloads=strstr(frame_text,"Descargas\n"),*about=strstr(frame_text,"Acerca de\n");
+            assert(integrations && downloads && about && integrations<downloads && downloads<about);
+            assert(!strstr(frame_text,"General\n") && !strstr(frame_text,"Interfaz\n") && !strstr(frame_text,"Almacenamiento\n"));
+        }
+        if (c==5) assert(strstr(frame_text,"RomM\n") && !strstr(frame_text,"Pair code\n"));
+        if (c==8) assert(strstr(frame_text,"URL del servidor\n") && strstr(frame_text,"Pair code\n") && strstr(frame_text,"Guardar\n"));
+        if (c==7) assert(strstr(frame_text,"Todo al día\n"));
+        if (c>=9 && c<=11) {
+            assert(strstr(frame_text,"VitaShelf Launcher · 01.00\n"));
+            assert(strstr(frame_text,"Libre: 12.0 GiB / 32.0 GiB\n"));
+            assert(strstr(frame_text,"Descargas: ux0:data/vitashelflauncher/downloads/\n"));
+            assert(strstr(frame_text,"Imágenes: ux0:data/vitashelflauncher/cache/covers/\n"));
+            if (c==10) assert(!strstr(frame_text,"Servidor:") && !strstr(frame_text,"Catálogo:") && !strstr(frame_text,"Última sincronización:"));
+            else {
+                assert(strstr(frame_text,"Servidor: romm.example.test\n"));
+                if (c==11) {
+                    assert(strstr(frame_text,"Catálogo: Sin sincronizar\n"));
+                    assert(strstr(frame_text,"Última sincronización: Sin datos\n"));
+                } else {
+                    assert(strstr(frame_text,"Catálogo: 6 juegos\n"));
+                    assert(strstr(frame_text,"Última sincronización: 21/11/2026 18:24\n"));
+                }
+            }
+        }
         if (argc>1) { char path[1024]; (void)snprintf(path,sizeof(path),"%s/%s.png",argv[1],cases[c]); assert(!cairo_surface_write_to_png(canvas,path)); }
     }
     vp_ui_shutdown();

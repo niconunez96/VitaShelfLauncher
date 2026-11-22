@@ -23,6 +23,7 @@ test-vita-lifecycle:
 	python3 tests/test_download_lifecycle.py
 	python3 tests/test_vita_thread_priority.py
 	python3 tests/test_romm_worker.py
+	python3 tests/test_settings_navigation.py
 
 build/test_presentation: src/vita/ui_presentation.c src/vita/ui_presentation.h tests/test_presentation.c
 	@mkdir -p build

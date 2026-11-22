@@ -7,6 +7,12 @@
 typedef struct { int x, y, w, h; } VpUiRect;
 typedef struct { const char *asset; uint32_t rgb; } VpUiPlatform;
 typedef struct { int motion_ms, radius, wallpaper_alpha; } VpUiAppearance;
+typedef enum {
+    VP_SETTINGS_INTEGRATIONS,
+    VP_SETTINGS_DOWNLOADS,
+    VP_SETTINGS_ABOUT,
+    VP_SETTINGS_COUNT
+} VpSettingsSection;
 #define VP_UI_GRID_PAGE 10
 #define VP_UI_LIST_PAGE 5
 #define VP_UI_CONSOLE_PAGE 6

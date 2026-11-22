@@ -127,7 +127,7 @@ int vp_ui_touch_carousel_offset(int x, int y) {
 
 int vp_ui_touch_settings_slot(int x, int y) {
     size_t slot;
-    for (slot=0; slot<6; slot++) if (inside(vp_ui_settings_row(slot),x,y)) return (int)slot;
+    for (slot=0; slot<VP_SETTINGS_COUNT; slot++) if (inside(vp_ui_settings_row(slot),x,y)) return (int)slot;
     return -1;
 }
 

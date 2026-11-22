@@ -58,6 +58,9 @@ static int settings_section;
 static int settings_field;
 static size_t download_selection;
 static bool settings_detail_active;
+static bool settings_romm_active;
+static char catalog_server[VP_URL];
+static char catalog_synced_at[32];
 static bool settings_ime_active;
 static SceWChar16 settings_ime_buffer[VP_URL];
 static unsigned long long installation_armed_at;
@@ -182,6 +185,15 @@ static bool load_catalog_cache(VpApp *app, const VpRommConfig *config) {
     if (valid) valid=vp_catalog_cache_read(file,version,&cached_catalog);
     if (fclose(file) != 0 || !valid || cached_catalog.count > VP_MAX_ITEMS) return false;
     app->catalog = cached_catalog;
+    (void)snprintf(catalog_server,sizeof(catalog_server),"%s",config->base_url);
+    catalog_synced_at[0]='\0';
+    {
+        SceIoStat info;
+        if (sceIoGetstat(VP_CATALOG_CACHE_PATH,&info)>=0 && info.st_mtime.year) {
+            (void)snprintf(catalog_synced_at,sizeof(catalog_synced_at),"%02u/%02u/%04u %02u:%02u",
+                info.st_mtime.day,info.st_mtime.month,info.st_mtime.year,info.st_mtime.hour,info.st_mtime.minute);
+        }
+    }
     catalog_view_cache_dirty = true;
     return true;
 }
@@ -614,6 +626,14 @@ static void background_job_poll(VpApp *app) {
     }
     if (kind == VP_JOB_SYNC_PROVIDERS || kind == VP_JOB_PAIR_AND_SYNC) {
         apply_provider_catalog(app, &background_job.catalog);
+        (void)snprintf(catalog_server,sizeof(catalog_server),"%s",config.base_url);
+        catalog_synced_at[0]='\0';
+        {
+            SceDateTime now;
+            if (sceRtcGetCurrentClockLocalTime(&now)>=0)
+                (void)snprintf(catalog_synced_at,sizeof(catalog_synced_at),"%02u/%02u/%04u %02u:%02u",
+                    now.day,now.month,now.year,now.hour,now.minute);
+        }
         show_notification(app, "Biblioteca sincronizada: %u juegos", (unsigned)app->catalog.count);
     } else if (kind == VP_JOB_SYNC_COVERS) {
         show_notification(app, "Metadata sincronizada: %u/%u caratulas",
@@ -773,23 +793,23 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
             settings_section--;
             vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
         }
-        if (pressed & SCE_CTRL_DOWN && settings_section < 5) {
+        if (pressed & SCE_CTRL_DOWN && settings_section < VP_SETTINGS_COUNT-1) {
             settings_section++;
             vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
         }
         if (pressed & SCE_CTRL_CROSS) {
             settings_detail_active = true;
-            if (settings_section == 3) request_romm_check();
             vp_ui_audio_play(VP_UI_SOUND_ENTER);
         }
         return;
     }
     if (pressed & SCE_CTRL_CIRCLE) {
-        settings_detail_active = false;
+        if (settings_romm_active) settings_romm_active = false;
+        else settings_detail_active = false;
         vp_ui_audio_play(VP_UI_SOUND_BACK);
         return;
     }
-    if (settings_section == 2) {
+    if (settings_section == VP_SETTINGS_DOWNLOADS) {
         VpDownloadEntry *entry;
         if (download_queue.count == 0) return;
         if (download_selection >= download_queue.count) download_selection = download_queue.count - 1;
@@ -846,7 +866,15 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
         }
         return;
     }
-    if (settings_section != 3) return;
+    if (settings_section != VP_SETTINGS_INTEGRATIONS) return;
+    if (!settings_romm_active) {
+        if (pressed & SCE_CTRL_CROSS) {
+            settings_romm_active = true;
+            request_romm_check();
+            vp_ui_audio_play(VP_UI_SOUND_ENTER);
+        }
+        return;
+    }
     if (pressed & SCE_CTRL_UP) {
         settings_field = (settings_field + 3) % 4;
         vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
@@ -1404,6 +1432,11 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
     frame->downloads = &download_queue; frame->download_selection = download_selection;
     frame->settings_section = settings_section; frame->settings_field = settings_field;
     frame->settings_detail = settings_detail_active;
+    frame->settings_romm = settings_romm_active;
+    frame->app_version = VP_APP_VERSION;
+    frame->romm_catalog_available = catalog_server[0] && !strcmp(catalog_server,romm_config.base_url);
+    (void)snprintf(frame->romm_last_sync,sizeof(frame->romm_last_sync),"%s",
+                   frame->romm_catalog_available?catalog_synced_at:"");
     frame->romm_url = romm_config.base_url; frame->pair_code = romm_pair_code;
     frame->romm_state = romm_connection.state;
     frame->active_theme = active_theme;
@@ -1425,7 +1458,7 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
                 (void)snprintf(clock,sizeof(clock),"%02u:%02u",time.hour,time.minute);
             }
             battery=scePowerGetBatteryLifePercent(); charging=scePowerIsBatteryCharging()>0;
-            if (app->active_screen==VP_SCREEN_SETTINGS && settings_section==4) {
+            if (app->active_screen==VP_SCREEN_SETTINGS && settings_section==VP_SETTINGS_ABOUT) {
                 SceIoDevInfo info={0};
                 if (sceIoDevctl("ux0:",0x3001,NULL,0,&info,sizeof(info))>=0) {
                     free_space=info.free_size; total_space=info.max_size;
@@ -1498,15 +1531,17 @@ static unsigned int touch_navigation_pressed(int x, int y) {
     }
     if (app.active_screen != VP_SCREEN_SETTINGS) return 0;
     if (y>=492 && y<534 && x>=350 && x<595) return SCE_CTRL_CROSS;
-    if (settings_detail_active && settings_section==2 && y>=492 && y<534 && x>=700 && x<804) return SCE_CTRL_SQUARE;
+    if (settings_detail_active && settings_section==VP_SETTINGS_DOWNLOADS && y>=492 && y<534 && x>=700 && x<804) return SCE_CTRL_SQUARE;
     if (settings_detail_active && vp_ui_touch_back(x, y)) return SCE_CTRL_CIRCLE;
-    if (vp_ui_touch_view_toggle(x,y) && settings_detail_active && settings_section==3) return SCE_CTRL_TRIANGLE;
+    if (vp_ui_touch_view_toggle(x,y) && settings_detail_active && settings_romm_active && settings_section==VP_SETTINGS_INTEGRATIONS) return SCE_CTRL_TRIANGLE;
     if (!settings_detail_active) {
         slot=vp_ui_touch_settings_slot(x,y);
         if (slot>=0) { settings_section=slot; return SCE_CTRL_CROSS; }
         return 0;
     }
-    if (settings_section == 3) {
+    if (settings_section == VP_SETTINGS_INTEGRATIONS && !settings_romm_active) {
+        if (vp_ui_touch_settings_slot(x,y)==0) return SCE_CTRL_CROSS;
+    } else if (settings_section == VP_SETTINGS_INTEGRATIONS) {
         for (slot = 0; slot < 4; slot++) {
             int row_y = 112 + slot * 72;
             if (x >= 310 && x < 910 && y >= row_y && y < row_y + 62) {
@@ -1514,7 +1549,7 @@ static unsigned int touch_navigation_pressed(int x, int y) {
                 return SCE_CTRL_CROSS;
             }
         }
-    } else if (settings_section == 2) {
+    } else if (settings_section == VP_SETTINGS_DOWNLOADS) {
         for (slot = 0; slot < 4 && (size_t)slot < download_queue.count; slot++) {
             int row_y = 120 + slot * 76;
             if (x >= 310 && x < 910 && y >= row_y && y < row_y + 68) {
