@@ -146,15 +146,25 @@ int main(void) {
         assert(!vp_ui_preferences_set(&preferences,"unrelated","1"));
         assert(vp_ui_preferences_set(&preferences,"ui_wallpaper_animated","1") && preferences.animated);
     }
-    for (i=0;i<=180000;i+=17) {
-        unsigned long long now=(unsigned long long)i*1000;
-        VpUiBackdropTransform t=vp_ui_backdrop_transform(now,true),still=vp_ui_backdrop_transform(now,false);
-        assert(t.scale>=1.019f && t.scale<=1.031f);
-        assert(t.x<=0 && t.y<=0 && t.x+960*t.scale>=960 && t.y+544*t.scale>=544);
-        assert(still.x==0 && still.y==0 && still.scale==1);
+    {
+        float min_scale=0,max_scale=0,min_x=0,max_x=0,min_y=0,max_y=0;
+        for (i=0;i<=16000;i+=13) {
+            unsigned long long now=(unsigned long long)i*1000;
+            VpUiBackdropTransform t=vp_ui_backdrop_transform(now,true),still=vp_ui_backdrop_transform(now,false);
+            if (!i || t.scale<min_scale) min_scale=t.scale;
+            if (!i || t.scale>max_scale) max_scale=t.scale;
+            if (!i || t.x<min_x) min_x=t.x;
+            if (!i || t.x>max_x) max_x=t.x;
+            if (!i || t.y<min_y) min_y=t.y;
+            if (!i || t.y>max_y) max_y=t.y;
+            assert(t.scale>=1.029f && t.scale<=1.071f);
+            assert(t.x<=0 && t.y<=0 && t.x+960*t.scale>=960 && t.y+544*t.scale>=544);
+            assert(still.x==0 && still.y==0 && still.scale==1);
+        }
+        assert(max_scale-min_scale>.035f && max_x-min_x>18.f && max_y-min_y>10.f);
     }
     {
-        VpUiBackdropTransform a=vp_ui_backdrop_transform(179999999,true),b=vp_ui_backdrop_transform(180000000,true);
+        VpUiBackdropTransform a=vp_ui_backdrop_transform(15999999,true),b=vp_ui_backdrop_transform(16000000,true);
         assert(fabsf(a.x-b.x)<.001f && fabsf(a.y-b.y)<.001f && fabsf(a.scale-b.scale)<.001f);
     }
     {

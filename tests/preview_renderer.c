@@ -302,6 +302,7 @@ int main(int argc,char **argv) {
             app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=true;
             frame.settings_section=VP_SETTINGS_APPEARANCE; frame.settings_field=(int)c-18;
             frame.preferences.wallpaper=(int)c-18; frame.preferences.animated=c!=21;
+            if (c==21) frame.settings_field=VP_UI_APPEARANCE_MOTION_SLOT;
         }
         if (c==22) {
             app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=true;
@@ -337,6 +338,7 @@ int main(int argc,char **argv) {
             assert(strstr(frame_text,"Fondo animado\n"));
             assert(strstr(frame_text,c==21?"Desactivado\n":"Activado\n"));
             assert(strstr(frame_text,c==22?"Oscuro\n":"Blanco\n"));
+            assert(strstr(frame_text,c==21?"Activar / Desactivar\n":c==22?"Cambiar color\n":"Aplicar fondo\n"));
         }
         if (c>=23) {
             assert(strstr(frame_text,"Probar conexión\n") && !strstr(frame_text,"Guardar\n"));

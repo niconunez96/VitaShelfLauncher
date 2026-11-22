@@ -215,13 +215,20 @@ int vp_ui_touch_appearance_slot(int x, int y) {
     return inside(vp_ui_wallpaper_motion_row(),x,y)?VP_UI_APPEARANCE_MOTION_SLOT:-1;
 }
 
+#define VP_UI_BACKDROP_LOOP_US 16000000ULL
+#define VP_UI_BACKDROP_SCALE_BASE 1.05f
+#define VP_UI_BACKDROP_SCALE_SWING .02f
+#define VP_UI_BACKDROP_X_SWING 11.f
+#define VP_UI_BACKDROP_Y_SWING 7.f
+
 VpUiBackdropTransform vp_ui_backdrop_transform(unsigned long long now, bool animated) {
     VpUiBackdropTransform transform={0,0,1};
-    float seconds=(float)(now%180000000ULL)/1000000.f;
+    float phase;
     if (!animated) return transform;
-    transform.scale=1.025f+.005f*sinf(seconds*6.2831853f/90.f);
-    transform.x=960.f*(1-transform.scale)/2+4*sinf(seconds*6.2831853f/60.f);
-    transform.y=544.f*(1-transform.scale)/2+2*cosf(seconds*6.2831853f/90.f);
+    phase=6.2831853f*(float)(now%VP_UI_BACKDROP_LOOP_US)/(float)VP_UI_BACKDROP_LOOP_US;
+    transform.scale=VP_UI_BACKDROP_SCALE_BASE+VP_UI_BACKDROP_SCALE_SWING*sinf(phase);
+    transform.x=960.f*(1-transform.scale)/2+VP_UI_BACKDROP_X_SWING*sinf(phase+1.0471976f);
+    transform.y=544.f*(1-transform.scale)/2+VP_UI_BACKDROP_Y_SWING*cosf(phase+2.0943951f);
     return transform;
 }
 

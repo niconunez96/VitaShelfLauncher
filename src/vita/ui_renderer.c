@@ -176,6 +176,12 @@ static void glass(VpUiRect r,bool selected,bool dark) {
     if (selected) focus(r);
 }
 
+static void toggle(VpUiRect r,bool on) {
+    float radius=r.h/2;
+    round_rect(r.x,r.y,r.w,r.h,radius,on?alpha(accent,235):C(24,42,78,255));
+    round_rect(on?r.x+r.w-r.h+2:r.x+2,r.y+2,r.h-4,r.h-4,radius-2,C(240,247,255,255));
+}
+
 static void console_card(VpUiRect r,bool selected,float lift) {
     vita2d_texture *material=asset("console_surface"),*ring=selected?asset("console_focus"):NULL;
     int ix,iy;
@@ -478,9 +484,13 @@ static void settings(const VpUiFrame *f) {
         }
         {
             VpUiRect r=vp_ui_wallpaper_motion_row();
+            VpUiRect sw={r.x+r.w-66,r.y+7,44,24};
+            const char *value=f->preferences.animated?"Activado":"Desactivado";
             glass(r,f->settings_field==VP_UI_APPEARANCE_MOTION_SLOT,false);
             text(f,VP_TYPE_DESCRIPTION,r.x+16,r.y+25,400,panel_primary,"Fondo animado");
-            text(f,VP_TYPE_DESCRIPTION,r.x+440,r.y+25,130,panel_primary,f->preferences.animated?"Activado":"Desactivado");
+            text(f,VP_TYPE_DESCRIPTION,sw.x-12-vp_ui_text_width(f->font,VP_TYPE_DESCRIPTION,false,value),
+                 r.y+25,110,panel_primary,value);
+            toggle(sw,f->preferences.animated);
         }
         return;
     }
@@ -631,7 +641,8 @@ static void footer(const VpUiFrame *f) {
     }
     if (downloads) action="Cancelar / Reintentar";
     if (f->app->active_screen==VP_SCREEN_SETTINGS && f->settings_detail && f->settings_section==VP_SETTINGS_APPEARANCE)
-        action=f->settings_field==VP_UI_WALLPAPER_COUNT?"Activar / Desactivar":"Aplicar fondo";
+        action=f->settings_field==VP_UI_APPEARANCE_MOTION_SLOT?"Activar / Desactivar":
+               f->settings_field==VP_UI_APPEARANCE_TEXT_COLOR_SLOT?"Cambiar color":"Aplicar fondo";
     if (f->app->active_screen==VP_SCREEN_SETTINGS && !f->settings_detail) action="Seleccionar";
     button(0,366,513); text(f,VP_TYPE_FOOTER,383,518,210,C(12,32,76,255),action);
     button(1,613,513); text(f,VP_TYPE_FOOTER,630,518,64,C(12,32,76,255),"Volver");
