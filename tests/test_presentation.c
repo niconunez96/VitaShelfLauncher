@@ -49,10 +49,15 @@ int main(void) {
         assert(vp_ui_touch_list_slot(r.x,r.y)==(int)i);
         assert(vp_ui_touch_list_slot(r.x+r.w,r.y)==-1);
     }
-    for (i=0;i<6;i++) {
+    assert(VP_SETTINGS_INTEGRATIONS==0 && VP_SETTINGS_DOWNLOADS==1 && VP_SETTINGS_ABOUT==2);
+    assert(VP_SETTINGS_COUNT==3);
+    for (i=0;i<VP_SETTINGS_COUNT;i++) {
         VpUiRect r=vp_ui_settings_row(i);
         assert(vp_ui_touch_settings_slot(r.x,r.y)==(int)i);
+        assert(vp_ui_touch_settings_slot(r.x+r.w-1,r.y+r.h-1)==(int)i);
+        assert(vp_ui_touch_settings_slot(r.x+r.w,r.y)==-1);
     }
+    assert(vp_ui_touch_settings_slot(310,288)==-1);
     {
         VpUiRect r=vp_ui_settings_content_card();
         assert(r.x==310 && r.y==148 && r.w==600 && r.h==270);

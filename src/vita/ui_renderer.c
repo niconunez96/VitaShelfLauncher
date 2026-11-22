@@ -180,7 +180,7 @@ void vp_ui_prepare(const VpUiFrame *f) {
         start=vp_ui_console_start(f->app->selected_platform,f->group_count);
         for (i=start;i<f->group_count && i<start+VP_UI_CONSOLE_PAGE;i++) (void)asset(vp_ui_platform(f->groups[i].platform)->asset);
     } else if (f->app->active_screen==VP_SCREEN_SETTINGS) {
-        const char *icons[]={"ui_general","ui_interface","ui_download","ui_romm","ui_storage","ui_info","ui_home","ui_key","ui_sync","ui_folder"};
+        const char *icons[]={"ui_server","ui_download","ui_romm","ui_info","ui_home","ui_key","ui_sync","ui_folder"};
         for (i=0;i<sizeof(icons)/sizeof(icons[0]);i++) (void)asset(icons[i]);
     }
     if (heading_asset(f)) (void)asset(heading_asset(f));
@@ -378,14 +378,14 @@ static void settings_empty(const VpUiFrame *f,const char *symbol,const char *tit
 }
 
 static void settings(const VpUiFrame *f) {
-    static const char *names[]={"General","Interfaz","Descargas","Conexión (RomM)","Almacenamiento","Acerca de"};
-    static const char *icons[]={"ui_general","ui_interface","ui_download","ui_romm","ui_storage","ui_info"};
+    static const char *names[]={"Integraciones","Descargas","Acerca de"};
+    static const char *icons[]={"ui_server","ui_download","ui_info"};
     int i,section=f->settings_section;
     icon("ui_settings",44,199,54);
     text(f,VP_TYPE_PAGE_TITLE,104,239,200,ink,"Ajustes");
     vp_ui_paragraph(f->font,VP_TYPE_PAGE_SUBTITLE,48,280,222,3,C(222,233,255,240),"Personaliza tu experiencia en VitaShelf Launcher.");
     if (!f->settings_detail) {
-        for (i=0;i<6;i++) {
+        for (i=0;i<VP_SETTINGS_COUNT;i++) {
             VpUiRect r=vp_ui_settings_row((size_t)i); glass(r,section==i,false);
             icon(icons[i],r.x+22,r.y+9,32);
             text(f,VP_TYPE_SETTINGS_ROW,r.x+80,r.y+32,r.w-116,ink,names[i]);
@@ -394,7 +394,7 @@ static void settings(const VpUiFrame *f) {
         }
         return;
     }
-    if (section==2) {
+    if (section==VP_SETTINGS_DOWNLOADS) {
         size_t start=(f->download_selection/4)*4,j;
         if (!f->downloads->count) { settings_empty(f,"ui_download","Todo al día","Agrega un juego desde la biblioteca para descargarlo."); return; }
         for (j=start;j<f->downloads->count && j<start+4;j++) {
@@ -412,7 +412,15 @@ static void settings(const VpUiFrame *f) {
         }
         return;
     }
-    if (section==3) {
+    if (section==VP_SETTINGS_INTEGRATIONS && !f->settings_romm) {
+        VpUiRect r=vp_ui_settings_row(0);
+        glass(r,true,false); icon("ui_romm",r.x+22,r.y+9,32);
+        text(f,VP_TYPE_SETTINGS_ROW,r.x+80,r.y+32,r.w-116,ink,"RomM");
+        vita2d_draw_line(r.x+r.w-28,r.y+18,r.x+r.w-21,r.y+25,ink);
+        vita2d_draw_line(r.x+r.w-21,r.y+25,r.x+r.w-28,r.y+32,ink);
+        return;
+    }
+    if (section==VP_SETTINGS_INTEGRATIONS) {
         const char *titles[]={"URL del servidor","Pair code","Sincronizar ahora","Sincronizar metadata"};
         const char *symbols[]={"ui_home","ui_key","ui_sync","ui_folder"};
         bool pair_enabled=vp_romm_pair_code_enabled(f->romm_state);
@@ -421,6 +429,7 @@ static void settings(const VpUiFrame *f) {
             (f->romm_state==VP_ROMM_CONNECTED?"Vinculado; no necesitas otro código":"Espera a que termine la comprobación"),
             "Actualiza el catálogo en segundo plano","Descarga y prepara las imágenes"};
         const char *status="Configura la URL y genera un pair code en RomM.";
+        text(f,VP_TYPE_LIST_TITLE,316,99,584,ink,"RomM");
         for (i=0;i<4;i++) {
             VpUiRect r={310,112+i*72,600,62}; bool disabled=i==1 && !pair_enabled;
             glass(r,!disabled && f->settings_field==i,false);
@@ -440,19 +449,33 @@ static void settings(const VpUiFrame *f) {
         return;
     }
     {
-        VpUiRect r=vp_ui_settings_content_card(); char detail[384]; glass(r,false,false);
-        icon(icons[section],334,168,48);
-        text(f,VP_TYPE_HERO_TITLE,400,203,470,ink,names[section]);
-        if (section==1) {
-            (void)snprintf(detail,sizeof(detail),"Tema: %s\nInter · 960 × 544\nTriángulo cambia la vista de la biblioteca.\nTemas: ux0:data/vitashelflauncher/themes/<tema>/theme.ini",f->app->theme.name);
-        } else if (section==4) {
-            (void)snprintf(detail,sizeof(detail),"Libre: %.1f GiB / %.1f GiB\nDescargas: ux0:data/vitashelflauncher/downloads/\nImágenes: ux0:data/vitashelflauncher/cache/covers/",f->storage_free/1073741824.,f->storage_total/1073741824.);
-        } else if (section==5) {
-            (void)snprintf(detail,sizeof(detail),"VitaShelf Launcher · Blueglass\nBiblioteca y launcher para PS Vita / PSTV.\nTipografía Inter por The Inter Project Authors.\nLogos y marcas pertenecen a sus respectivos titulares.");
-        } else {
-            (void)snprintf(detail,sizeof(detail),"%u juegos en tu biblioteca.\nUsa L / R para cambiar de sección.\nDescargas y sincronización en segundo plano.\nSTART pausa las descargas y sale de VitaShelf Launcher.",(unsigned)f->app->catalog.count);
+        VpUiRect r={310,108,600,360}; char detail[VP_URL+32]; glass(r,false,false);
+        icon("ui_info",334,126,36);
+        text(f,VP_TYPE_HERO_TITLE,384,155,502,ink,"Acerca de");
+        (void)snprintf(detail,sizeof(detail),"VitaShelf Launcher · %s",f->app_version?f->app_version:"—");
+        text(f,VP_TYPE_LIST_TITLE,334,191,552,ink,detail);
+        (void)snprintf(detail,sizeof(detail),"Libre: %.1f GiB / %.1f GiB",f->storage_free/1073741824.,f->storage_total/1073741824.);
+        text(f,VP_TYPE_DESCRIPTION,334,224,552,ink,detail);
+        text(f,VP_TYPE_DESCRIPTION,334,250,552,ink,"Descargas: ux0:data/vitashelflauncher/downloads/");
+        text(f,VP_TYPE_DESCRIPTION,334,276,552,ink,"Imágenes: ux0:data/vitashelflauncher/cache/covers/");
+        if (f->romm_state==VP_ROMM_CONNECTED) {
+            const char *server=f->romm_url?f->romm_url:"",*scheme=strstr(server,"://"),*end,*at;
+            size_t count=0,j;
+            if (scheme) server=scheme+3;
+            end=server+strcspn(server,"/?#");
+            for (at=server;at<end;at++) if (*at=='@') server=at+1;
+            icon("ui_romm",334,300,24);
+            text(f,VP_TYPE_LIST_TITLE,370,320,516,ink,"RomM");
+            (void)snprintf(detail,sizeof(detail),"Servidor: %.*s",(int)(end-server),server);
+            text(f,VP_TYPE_DESCRIPTION,334,350,552,ink,detail);
+            for (j=0;j<f->app->catalog.count;j++) if (f->app->catalog.items[j].source==VP_SOURCE_ROMM) count++;
+            if (f->romm_catalog_available) (void)snprintf(detail,sizeof(detail),"Catálogo: %u juegos",(unsigned)count);
+            else (void)snprintf(detail,sizeof(detail),"Catálogo: Sin sincronizar");
+            text(f,VP_TYPE_DESCRIPTION,334,382,552,ink,detail);
+            (void)snprintf(detail,sizeof(detail),"Última sincronización: %s",
+                f->romm_catalog_available && f->romm_last_sync[0]?f->romm_last_sync:"Sin datos");
+            text(f,VP_TYPE_DESCRIPTION,334,414,552,ink,detail);
         }
-        vp_ui_paragraph(f->font,VP_TYPE_PAGE_SUBTITLE,338,254,546,7,ink,detail);
     }
 }
 
@@ -465,8 +488,8 @@ static void button(int kind,int x,int y) {
 
 static void footer(const VpUiFrame *f) {
     bool roms=f->app->active_screen==VP_SCREEN_LIBRARY && f->app->library_level==VP_LEVEL_ROMS && f->visible_count;
-    bool downloads=f->app->active_screen==VP_SCREEN_SETTINGS && f->settings_detail && f->settings_section==2;
-    bool connection=f->app->active_screen==VP_SCREEN_SETTINGS && f->settings_detail && f->settings_section==3;
+    bool downloads=f->app->active_screen==VP_SCREEN_SETTINGS && f->settings_detail && f->settings_section==VP_SETTINGS_DOWNLOADS;
+    bool connection=f->app->active_screen==VP_SCREEN_SETTINGS && f->settings_detail && f->settings_romm && f->settings_section==VP_SETTINGS_INTEGRATIONS;
     const char *action=roms?"Descargar":"Abrir";
     VpUiRect r={24,492,912,42};
     round_rect(r.x-1,r.y-1,r.w+2,r.h+2,22,C(233,244,255,150));
@@ -502,15 +525,15 @@ void vp_ui_render(const VpUiFrame *f) {
     ink=color(f->app->theme.text,C(250,252,255,255));
     muted=color(f->app->theme.muted,C(204,220,249,255));
     accent=color(f->app->theme.accent,C(79,159,255,255));
-    (void)snprintf(key,sizeof(key),"%d:%d:%d:%u:%u:%d:%d:%d",f->app->active_screen,f->app->library_level,f->app->active_view,
-        (unsigned)f->app->selected_platform,(unsigned)f->app->selected_item,f->settings_section,f->settings_field,f->settings_detail);
+    (void)snprintf(key,sizeof(key),"%d:%d:%d:%u:%u:%d:%d:%d:%d",f->app->active_screen,f->app->library_level,f->app->active_view,
+        (unsigned)f->app->selected_platform,(unsigned)f->app->selected_item,f->settings_section,f->settings_field,f->settings_detail,f->settings_romm);
     if (strcmp(key,focus_key)) { (void)snprintf(focus_key,sizeof(focus_key),"%s",key); focus_at=now; }
     entrance=appearance.motion_ms?vp_ui_ease((float)(now-focus_at)/(appearance.motion_ms*1000.f)):1;
     backdrop(f,now); header(f); heading(f);
     if (f->app->active_screen==VP_SCREEN_LIBRARY) {
         if (f->app->library_level==VP_LEVEL_PLATFORMS) {
             if (f->group_count) platforms(f);
-            else empty(f,"ui_library","Tu biblioteca te espera","Abre Ajustes / Conexión (RomM) para conectar tu servidor.");
+            else empty(f,"ui_library","Tu biblioteca te espera","Abre Ajustes / Integraciones / RomM para conectar tu servidor.");
         } else if (f->visible_count) roms(f);
         else empty(f,"ui_folder","No hay juegos en esta consola","Círculo vuelve a la biblioteca.");
     } else if (f->app->active_screen==VP_SCREEN_SETTINGS) settings(f);

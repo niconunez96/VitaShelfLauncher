@@ -28,7 +28,7 @@ La Biblioteca ofrece tres maneras de explorar cada plataforma: grilla, lista con
 
 ![Vista de carrusel de ROMs de VitaShelf Launcher](docs/images/vitashelf-roms-carousel.png)
 
-### Conexión (RomM) / Connection (RomM)
+### Integraciones → RomM / Integrations → RomM
 
 ![Pantalla de conexión a RomM de VitaShelf Launcher](docs/images/vitashelf-romm-connection.png)
 
@@ -45,12 +45,14 @@ La Biblioteca ofrece tres maneras de explorar cada plataforma: grilla, lista con
 
 ### 2. Configurar RomM
 
-1. En la app, abrí **Ajustes → Conexión (RomM)**.
+1. En la app, abrí **Ajustes → Integraciones → RomM**.
 2. Elegí **URL del servidor**, presioná `X` e ingresá la URL base de tu RomM; por ejemplo, `http://192.168.1.100:8080`.
 3. En RomM, creá un código con **Pair Device** para un cliente con los permisos mínimos de lectura y descarga.
 4. En VitaShelf, elegí **Pair code**, ingresá el código y presioná `Triángulo` para canjearlo y sincronizar el catálogo.
 
 El código se usa una sola vez. No compartas el archivo de configuración de la app: contiene el token de acceso recibido. Para descargas pausadas, presioná `X` para reanudar o `Cuadrado` para quitarlas de la cola.
+
+Los ajustes se ordenan en **Integraciones**, **Descargas** y **Acerca de**. En **Acerca de** puedes consultar la versión, el espacio libre y las rutas de almacenamiento; si RomM está conectado, también verás el servidor, la cantidad de juegos de su catálogo y la última sincronización. Si aún no hay un catálogo sincronizado para ese servidor, se indica sin mostrar datos de otro servidor.
 
 ## English
 
@@ -65,12 +67,14 @@ El código se usa una sola vez. No compartas el archivo de configuración de la 
 
 ### 2. Configure RomM
 
-1. In the app, open **Settings → Connection (RomM)**.
+1. In the app, open **Settings → Integrations → RomM**.
 2. Select **Server URL**, press `X`, and enter your RomM base URL; for example, `http://192.168.1.100:8080`.
 3. In RomM, create a code with **Pair Device** for a client with the minimum read and download permissions.
 4. In VitaShelf, select **Pair code**, enter the code, then press `Triangle` to redeem it and sync your catalog.
 
 The code is one-time use. Do not share the app configuration file: it contains the access token received. For paused downloads, press `X` to resume or `Square` to remove them from the queue.
+
+Settings are ordered as **Integrations**, **Downloads**, and **About**. **About** shows the version, free space, and storage paths; when RomM is connected, it also shows the server, its catalog game count, and the last synchronization. A server without a synchronized catalog is identified explicitly rather than showing another server's data.
 
 ## Development
 

@@ -29,6 +29,7 @@ if(DEFINED ENV{VITASDK})
     src/vita/ui_presentation.c
     src/vita/ui_renderer.c
     src/vita/vita_backend.c)
+  target_compile_definitions(vitashelflauncher PRIVATE VP_APP_VERSION="${VITA_VERSION}")
   # Catch large automatic buffers before they can exhaust a Vita thread stack.
   target_compile_options(vitashelflauncher PRIVATE -Werror=frame-larger-than=16384)
   target_link_libraries(vitashelflauncher vitashelflauncher_core vita2d freetype png jpeg curl zip z zstd bz2 lzma ssl crypto m pthread
