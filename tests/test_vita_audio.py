@@ -1,7 +1,12 @@
 """Source-level contract for Vita UI sound packaging and action mapping."""
 import pathlib
 import re
+import struct
+import subprocess
+import sys
+import tempfile
 import unittest
+import wave
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -16,6 +21,37 @@ SOUNDS = {
 
 
 class VitaAudioTests(unittest.TestCase):
+    def test_cues_match_the_player_format_and_have_safe_short_envelopes(self):
+        for action, filename in SOUNDS.items():
+            with self.subTest(action=action):
+                with wave.open(str(ROOT / "assets/audio" / filename), "rb") as cue:
+                    self.assertEqual(cue.getnchannels(), 1)
+                    self.assertEqual(cue.getsampwidth(), 2)
+                    self.assertEqual(cue.getframerate(), 48000)
+                    self.assertEqual(cue.getcomptype(), "NONE")
+                    duration = cue.getnframes() / cue.getframerate()
+                    self.assertGreater(duration, 0.04)
+                    self.assertLessEqual(duration, 0.10 if action == "navigation" else 0.60)
+                    pcm = cue.readframes(cue.getnframes())
+                samples = [value[0] / 32768 for value in struct.iter_unpack("<h", pcm)]
+                peak = max(abs(value) for value in samples)
+                self.assertGreater(peak, 0.10, "Cue must not be silent")
+                self.assertLessEqual(peak, 0.40, "Keep headroom for the Vita output")
+                self.assertLess(abs(sum(samples) / len(samples)), 0.002, "DC offset")
+                self.assertEqual(samples[0], 0.0)
+                self.assertEqual(samples[-1], 0.0)
+                self.assertLess(max(abs(b - a) for a, b in zip(samples, samples[1:])), 0.07,
+                                "Abrupt waveform steps can produce clicks")
+
+    def test_shipped_cues_are_reproducible_from_the_original_synthesis(self):
+        with tempfile.TemporaryDirectory() as output:
+            subprocess.run([sys.executable, str(ROOT / "scripts/generate-ui-audio.py"),
+                            "--output-dir", output], check=True, capture_output=True)
+            for filename in SOUNDS.values():
+                with self.subTest(filename=filename):
+                    self.assertEqual((pathlib.Path(output) / filename).read_bytes(),
+                                     (ROOT / "assets/audio" / filename).read_bytes())
+
     def test_pcm_sounds_are_packaged_in_the_vpk(self):
         cmake = (ROOT / "CMakeLists.txt").read_text()
         for filename in SOUNDS.values():

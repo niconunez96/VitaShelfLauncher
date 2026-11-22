@@ -79,6 +79,7 @@ if(DEFINED ENV{VITASDK})
               ${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/NOTICE.md assets/licenses/Blueglass-NOTICE.md
               ${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/sources/RomM-AGPL-3.0.txt assets/licenses/RomM-AGPL-3.0.txt
               ${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/sources/romm-isotipo.svg assets/licenses/romm-isotipo.svg
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/NOTICE.md assets/licenses/Audio-NOTICE.md
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/01-navegacion-alternativa.wav assets/audio/01-navegacion-alternativa.wav
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/02-cambio-tab.wav assets/audio/02-cambio-tab.wav
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio/03-entrar.wav assets/audio/03-entrar.wav
