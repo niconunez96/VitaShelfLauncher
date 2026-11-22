@@ -254,7 +254,7 @@ static void load_providers(VpApp *app) {
             (void)snprintf(active_theme, sizeof(active_theme), "%s", equals);
         else if (strcmp(line, "active_view") == 0 && vp_view_from_string(equals, &configured_view))
             active_view_configured = true;
-        else if (strncmp(line, "ui_wallpaper", 12) == 0)
+        else if (strncmp(line, "ui_wallpaper", 12) == 0 || strcmp(line, "ui_text_color") == 0)
             (void)vp_ui_preferences_set(&ui_preferences, line, equals);
         else if (strncmp(line, "launch_", 7) == 0)
             (void)vp_launch_config_set(&launch_config, line + 7, equals);
@@ -285,8 +285,9 @@ static bool save_romm_config(void) {
                    romm_config.base_url, romm_config.token, romm_config.image_proxy_url,
                     homebrew_config.catalog_url, active_theme);
     (void)fprintf(file, "active_view=%s\n", vp_view_name(app.active_view));
-    (void)fprintf(file, "ui_wallpaper=%s\nui_wallpaper_animated=%d\n",
-                  vp_ui_wallpaper(ui_preferences.wallpaper)->id, ui_preferences.animated?1:0);
+    (void)fprintf(file, "ui_wallpaper=%s\nui_text_color=%s\nui_wallpaper_animated=%d\n",
+                  vp_ui_wallpaper(ui_preferences.wallpaper)->id,
+                  vp_ui_text_color(ui_preferences.text_color)->id, ui_preferences.animated?1:0);
     for (index = 0; index < launch_config.count; index++) {
         const VpLaunchProfile *profile = &launch_config.profiles[index];
         (void)fprintf(file, "launch_%s=%s:%s\n", profile->platform, profile->titleid,
@@ -857,21 +858,37 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
     }
     if (settings_section == VP_SETTINGS_APPEARANCE) {
         if (pressed & SCE_CTRL_UP) {
-            settings_field=settings_field>=2?settings_field-2:VP_UI_WALLPAPER_COUNT;
+            if (settings_field==VP_UI_APPEARANCE_TEXT_COLOR_SLOT) settings_field=2;
+            else if (settings_field==VP_UI_APPEARANCE_MOTION_SLOT) settings_field=VP_UI_APPEARANCE_TEXT_COLOR_SLOT;
+            else settings_field=settings_field>=2?settings_field-2:VP_UI_APPEARANCE_MOTION_SLOT;
             vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
         }
         if (pressed & SCE_CTRL_DOWN) {
-            settings_field=settings_field==VP_UI_WALLPAPER_COUNT?0:
-                (settings_field<2?settings_field+2:VP_UI_WALLPAPER_COUNT);
+            if (settings_field<2) settings_field+=2;
+            else if (settings_field<VP_UI_WALLPAPER_COUNT) settings_field=VP_UI_APPEARANCE_TEXT_COLOR_SLOT;
+            else if (settings_field==VP_UI_APPEARANCE_TEXT_COLOR_SLOT) settings_field=VP_UI_APPEARANCE_MOTION_SLOT;
+            else settings_field=0;
             vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
         }
-        if (pressed & (SCE_CTRL_LEFT|SCE_CTRL_RIGHT) && settings_field<VP_UI_WALLPAPER_COUNT) {
-            settings_field^=1;
-            vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+        if (pressed & (SCE_CTRL_LEFT|SCE_CTRL_RIGHT)) {
+            if (settings_field<VP_UI_WALLPAPER_COUNT) {
+                settings_field^=1;
+                vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+            } else if (settings_field==VP_UI_APPEARANCE_TEXT_COLOR_SLOT) {
+                VpUiPreferences previous=ui_preferences;
+                int delta=(pressed & SCE_CTRL_RIGHT)?1:-1;
+                ui_preferences.text_color=(ui_preferences.text_color+delta+VP_UI_TEXT_COLOR_COUNT)%VP_UI_TEXT_COLOR_COUNT;
+                if (!save_romm_config()) {
+                    ui_preferences=previous;
+                    show_notification(app,"No se pudo guardar la apariencia");
+                } else vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+            }
         }
         if (pressed & SCE_CTRL_CROSS) {
             VpUiPreferences previous=ui_preferences;
-            if (settings_field==VP_UI_WALLPAPER_COUNT) ui_preferences.animated=!ui_preferences.animated;
+            if (settings_field==VP_UI_APPEARANCE_MOTION_SLOT) ui_preferences.animated=!ui_preferences.animated;
+            else if (settings_field==VP_UI_APPEARANCE_TEXT_COLOR_SLOT)
+                ui_preferences.text_color=(ui_preferences.text_color+1)%VP_UI_TEXT_COLOR_COUNT;
             else ui_preferences.wallpaper=settings_field;
             if (!save_romm_config()) {
                 ui_preferences=previous;

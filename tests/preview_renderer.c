@@ -219,7 +219,7 @@ int main(int argc,char **argv) {
     const char *slugs[]={"arcade","dreamcast","gba","nds","gamecube","psx","psp","3ds","ps2","snes","genesis","wii"};
     const char *titles[]={"Bloody Roar II","Castlevania: Symphony of the Night","Crash Bandicoot","Gran Turismo","Metal Gear Solid",
         "Resident Evil","Silent Hill","Dino Crisis","Tomb Raider","Ridge Racer","A game with a very long title and accents: aventura fantástica","Another game"};
-    const char *cases[]={"platforms","carousel","list","grid","settings","integrations","downloads","downloads-empty","romm","about","about-disconnected","about-never-synced","store","empty","last-page","platforms-arcade","platforms-gba","platforms-last","appearance-dark","appearance-violet","appearance-waves","appearance-light-blue"};
+    const char *cases[]={"platforms","carousel","list","grid","settings","integrations","downloads","downloads-empty","romm","about","about-disconnected","about-never-synced","store","empty","last-page","platforms-arcade","platforms-gba","platforms-last","appearance-dark","appearance-violet","appearance-waves","appearance-light-blue","appearance-text-dark"};
     size_t c,i;
     cr=cairo_create(canvas); assert(!FT_Init_FreeType(&freetype)); assert(vp_ui_fonts_load(&typefaces));
     assert(vp_ui_backdrop_init());
@@ -282,10 +282,15 @@ int main(int argc,char **argv) {
         if (c==13) frame.group_count=0;
         if (c==14) { app.library_level=VP_LEVEL_ROMS; app.active_view=VP_VIEW_GRID; app.selected_item=11; }
         if (c>=15) app.selected_platform=c==15?0:(c==16?2:11);
-        if (c>=18) {
+        if (c>=18 && c<=21) {
             app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=true;
             frame.settings_section=VP_SETTINGS_APPEARANCE; frame.settings_field=(int)c-18;
             frame.preferences.wallpaper=(int)c-18; frame.preferences.animated=c!=21;
+        }
+        if (c==22) {
+            app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=true;
+            frame.settings_section=VP_SETTINGS_APPEARANCE; frame.settings_field=VP_UI_APPEARANCE_TEXT_COLOR_SLOT;
+            frame.preferences.wallpaper=3; frame.preferences.text_color=VP_UI_TEXT_COLOR_DARK; frame.preferences.animated=true;
         }
         (void)snprintf(app.active_platform,sizeof(app.active_platform),"psx");
         frame.romm_state=c==10?VP_ROMM_UNCONFIGURED:VP_ROMM_CONNECTED;
@@ -302,8 +307,10 @@ int main(int argc,char **argv) {
         if (c==7) assert(strstr(frame_text,"Todo al día\n"));
         if (c>=18) {
             for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) assert(strstr(frame_text,vp_ui_wallpaper((int)i)->label));
+            assert(strstr(frame_text,"Color de texto\n"));
             assert(strstr(frame_text,"Fondo animado\n"));
             assert(strstr(frame_text,c==21?"Desactivado\n":"Activado\n"));
+            assert(strstr(frame_text,c==22?"Oscuro\n":"Blanco\n"));
         }
         if (c>=9 && c<=11) {
             assert(strstr(frame_text,"VitaShelf Launcher · 01.00\n"));
@@ -336,6 +343,6 @@ int main(int argc,char **argv) {
     vp_ui_fonts_free(&typefaces);
     assert(!textures && !fonts && drawn>0);
     cairo_destroy(cr); cairo_surface_destroy(canvas); FT_Done_FreeType(freetype);
-    puts("Blueglass renderer: 22 states, four wallpapers, opaque console bodies, border-only focus, partial/missing assets, Inter metrics and cleanup passed");
+    puts("Blueglass renderer: 23 states, four wallpapers, text color presets, opaque console bodies, border-only focus, partial/missing assets, Inter metrics and cleanup passed");
     return 0;
 }

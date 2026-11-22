@@ -47,8 +47,9 @@ int main(void) {
     vp_launch_config_init(&launch_config);
     load_providers(&app);
     assert(app.active_view==VP_VIEW_LIST); /* user view wins over the theme default */
-    assert(ui_preferences.wallpaper==0 && ui_preferences.animated);
+    assert(ui_preferences.wallpaper==0 && ui_preferences.text_color==VP_UI_TEXT_COLOR_WHITE && ui_preferences.animated);
     assert(vp_ui_preferences_set(&ui_preferences,"ui_wallpaper","violet"));
+    assert(vp_ui_preferences_set(&ui_preferences,"ui_text_color","dark"));
     assert(vp_ui_preferences_set(&ui_preferences,"ui_wallpaper_animated","0"));
     assert(save_romm_config());
     memset(&romm_config,0,sizeof(romm_config));
@@ -58,7 +59,7 @@ int main(void) {
     app.active_view=VP_VIEW_GRID;
     load_providers(&app);
     assert(app.active_view==VP_VIEW_LIST);
-    assert(ui_preferences.wallpaper==1 && !ui_preferences.animated);
+    assert(ui_preferences.wallpaper==1 && ui_preferences.text_color==VP_UI_TEXT_COLOR_DARK && !ui_preferences.animated);
     assert(!strcmp(romm_config.token,"test-fixture"));
     assert(!strcmp(romm_config.image_proxy_url,"http://127.0.0.1:2/image"));
     assert(!strcmp(homebrew_config.catalog_url,"http://127.0.0.1:3/catalog"));
@@ -71,6 +72,7 @@ int main(void) {
     saved[length]='\0';
     assert(strstr(saved,"active_view=carousel\n"));
     assert(strstr(saved,"ui_wallpaper=violet\n"));
+    assert(strstr(saved,"ui_text_color=dark\n"));
     assert(!symlink("/dev/full",VP_CONFIG_PATH ".tmp"));
     assert(!save_romm_config());
     file=fopen(VP_CONFIG_PATH,"r"); assert(file);
@@ -82,7 +84,7 @@ int main(void) {
     vp_launch_config_init(&launch_config);
     load_providers(&app);
     assert(!strcmp(romm_config.token,"test-fixture"));
-    assert(app.active_view==VP_VIEW_CAROUSEL && ui_preferences.wallpaper==1);
+    assert(app.active_view==VP_VIEW_CAROUSEL && ui_preferences.wallpaper==1 && ui_preferences.text_color==VP_UI_TEXT_COLOR_DARK);
     assert(access(VP_CONFIG_PATH ".bak",F_OK)!=0);
     puts("View and appearance persistence, backup recovery and failed-save recovery: PASS");
 }
@@ -196,21 +198,21 @@ int main(void) {
     handle_settings_input(&app,SCE_CTRL_CROSS);
     assert(ui_preferences.wallpaper==3 && saves==2);
     handle_settings_input(&app,SCE_CTRL_DOWN);
-    assert(settings_field==VP_UI_WALLPAPER_COUNT);
+    assert(settings_field==VP_UI_APPEARANCE_TEXT_COLOR_SLOT);
     handle_settings_input(&app,SCE_CTRL_CROSS);
-    assert(!ui_preferences.animated && saves==3);
+    assert(ui_preferences.text_color==VP_UI_TEXT_COLOR_LIGHT && saves==3);
+    handle_settings_input(&app,SCE_CTRL_LEFT);
+    assert(ui_preferences.text_color==VP_UI_TEXT_COLOR_WHITE && saves==4);
     save_ok=false;
+    handle_settings_input(&app,SCE_CTRL_RIGHT);
+    assert(ui_preferences.text_color==VP_UI_TEXT_COLOR_WHITE && saves==5);
+    save_ok=true;
+    handle_settings_input(&app,SCE_CTRL_DOWN);
+    assert(settings_field==VP_UI_APPEARANCE_MOTION_SLOT);
     handle_settings_input(&app,SCE_CTRL_CROSS);
-    assert(!ui_preferences.animated && saves==4);
+    assert(!ui_preferences.animated && saves==6);
     handle_settings_input(&app,SCE_CTRL_DOWN);
     assert(settings_field==0);
-    handle_settings_input(&app,SCE_CTRL_CROSS);
-    assert(ui_preferences.wallpaper==3 && saves==5);
-    save_ok=true;
-    handle_settings_input(&app,SCE_CTRL_UP);
-    assert(settings_field==VP_UI_WALLPAPER_COUNT);
-    handle_settings_input(&app,SCE_CTRL_UP);
-    assert(settings_field==2);
     handle_settings_input(&app,SCE_CTRL_CIRCLE);
     handle_settings_input(&app,SCE_CTRL_CROSS);
     assert(settings_field==3);
@@ -233,6 +235,10 @@ int main(void) {
         assert(touch_navigation_pressed(tile.x+tile.w,tile.y)==0);
         assert(settings_field==i);
     }
+    row=vp_ui_text_color_row();
+    int text_color=ui_preferences.text_color;
+    handle_settings_input(&app,touch_navigation_pressed(row.x+1,row.y+1));
+    assert(ui_preferences.text_color==(text_color+1)%VP_UI_TEXT_COLOR_COUNT);
     row=vp_ui_wallpaper_motion_row();
     bool animated=ui_preferences.animated;
     handle_settings_input(&app,touch_navigation_pressed(row.x+1,row.y+1));

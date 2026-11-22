@@ -59,25 +59,35 @@ int main(void) {
         assert(vp_ui_touch_settings_slot(r.x+r.w,r.y)==-1);
     }
     assert(vp_ui_touch_settings_slot(310,348)==-1);
-    for (i=0;i<=VP_UI_WALLPAPER_COUNT;i++) {
-        VpUiRect r=i==VP_UI_WALLPAPER_COUNT?vp_ui_wallpaper_motion_row():vp_ui_wallpaper_tile(i);
+    for (i=0;i<VP_UI_APPEARANCE_SLOT_COUNT;i++) {
+        VpUiRect r=i<VP_UI_WALLPAPER_COUNT?vp_ui_wallpaper_tile(i):
+            i==VP_UI_APPEARANCE_TEXT_COLOR_SLOT?vp_ui_text_color_row():vp_ui_wallpaper_motion_row();
         assert(r.x>=310 && r.x+r.w<=910 && r.y>=100 && r.y+r.h<=490);
         assert(vp_ui_touch_appearance_slot(r.x,r.y)==(int)i);
         assert(vp_ui_touch_appearance_slot(r.x+r.w-1,r.y+r.h-1)==(int)i);
         assert(vp_ui_touch_appearance_slot(r.x+r.w,r.y)==-1);
         assert(vp_ui_touch_appearance_slot(r.x,r.y+r.h)==-1);
     }
+    assert(vp_ui_text_color_row().y < vp_ui_wallpaper_motion_row().y);
     {
         VpUiPreferences preferences=VP_UI_PREFERENCES_DEFAULT;
-        assert(preferences.wallpaper==0 && preferences.animated);
+        assert(preferences.wallpaper==0 && preferences.text_color==VP_UI_TEXT_COLOR_WHITE && preferences.animated);
         assert(!strcmp(vp_ui_wallpaper(-1)->id,"dark-blue"));
         assert(!strcmp(vp_ui_wallpaper(VP_UI_WALLPAPER_COUNT)->id,"dark-blue"));
+        assert(!strcmp(vp_ui_text_color(-1)->id,"white"));
+        assert(!strcmp(vp_ui_text_color(VP_UI_TEXT_COLOR_COUNT)->id,"white"));
         for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) {
             assert(vp_ui_preferences_set(&preferences,"ui_wallpaper",vp_ui_wallpaper((int)i)->id));
             assert(preferences.wallpaper==(int)i);
         }
         assert(!vp_ui_preferences_set(&preferences,"ui_wallpaper","../../other"));
         assert(preferences.wallpaper==VP_UI_WALLPAPER_COUNT-1);
+        for (i=0;i<VP_UI_TEXT_COLOR_COUNT;i++) {
+            assert(vp_ui_preferences_set(&preferences,"ui_text_color",vp_ui_text_color((int)i)->id));
+            assert(preferences.text_color==(int)i);
+        }
+        assert(!vp_ui_preferences_set(&preferences,"ui_text_color","rainbow"));
+        assert(preferences.text_color==VP_UI_TEXT_COLOR_COUNT-1);
         assert(vp_ui_preferences_set(&preferences,"ui_wallpaper_animated","0") && !preferences.animated);
         assert(!vp_ui_preferences_set(&preferences,"ui_wallpaper_animated","2") && !preferences.animated);
         assert(!vp_ui_preferences_set(&preferences,"unrelated","1"));

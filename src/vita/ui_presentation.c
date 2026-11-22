@@ -110,11 +110,25 @@ const VpUiWallpaper *vp_ui_wallpaper(int index) {
     return &wallpapers[index>=0 && index<VP_UI_WALLPAPER_COUNT?index:0];
 }
 
+const VpUiTextColor *vp_ui_text_color(int index) {
+    static const VpUiTextColor colors[VP_UI_TEXT_COLOR_COUNT] = {
+        {"white", "Blanco"},
+        {"light", "Claro"},
+        {"dark", "Oscuro"},
+        {"black", "Negro"}
+    };
+    return &colors[index>=0 && index<VP_UI_TEXT_COLOR_COUNT?index:0];
+}
+
 bool vp_ui_preferences_set(VpUiPreferences *preferences, const char *key, const char *value) {
     int i;
     if (!strcmp(key,"ui_wallpaper")) {
         for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) {
             if (!strcmp(value,vp_ui_wallpaper(i)->id)) { preferences->wallpaper=i; return true; }
+        }
+    } else if (!strcmp(key,"ui_text_color")) {
+        for (i=0;i<VP_UI_TEXT_COLOR_COUNT;i++) {
+            if (!strcmp(value,vp_ui_text_color(i)->id)) { preferences->text_color=i; return true; }
         }
     } else if (!strcmp(key,"ui_wallpaper_animated") && (!strcmp(value,"0") || !strcmp(value,"1"))) {
         preferences->animated=value[0]=='1';
@@ -124,19 +138,25 @@ bool vp_ui_preferences_set(VpUiPreferences *preferences, const char *key, const 
 }
 
 VpUiRect vp_ui_wallpaper_tile(size_t slot) {
-    VpUiRect r={310+(int)(slot%2)*300,104+(int)(slot/2)*174,286,160};
+    VpUiRect r={310+(int)(slot%2)*300,102+(int)(slot/2)*146,286,134};
+    return r;
+}
+
+VpUiRect vp_ui_text_color_row(void) {
+    VpUiRect r={310,396,586,38};
     return r;
 }
 
 VpUiRect vp_ui_wallpaper_motion_row(void) {
-    VpUiRect r={310,450,586,38};
+    VpUiRect r={310,440,586,38};
     return r;
 }
 
 int vp_ui_touch_appearance_slot(int x, int y) {
     size_t i;
     for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) if (inside(vp_ui_wallpaper_tile(i),x,y)) return (int)i;
-    return inside(vp_ui_wallpaper_motion_row(),x,y)?VP_UI_WALLPAPER_COUNT:-1;
+    if (inside(vp_ui_text_color_row(),x,y)) return VP_UI_APPEARANCE_TEXT_COLOR_SLOT;
+    return inside(vp_ui_wallpaper_motion_row(),x,y)?VP_UI_APPEARANCE_MOTION_SLOT:-1;
 }
 
 VpUiBackdropTransform vp_ui_backdrop_transform(unsigned long long now, bool animated) {
