@@ -1582,9 +1582,9 @@ static unsigned int touch_navigation_pressed(int x, int y) {
         if (y>=492 && y<534 && x>=350 && x<595) return SCE_CTRL_CROSS;
         if (app.library_level == VP_LEVEL_PLATFORMS) {
             size_t target;
-            slot = vp_ui_touch_console_slot(x, y);
+            slot = vp_ui_touch_platform(x, y);
             if (slot < 0) return 0;
-            target = vp_ui_console_start(app.selected_platform,platform_group_count)+(size_t)slot;
+            target = (size_t)slot;
             if (target >= platform_group_count) return 0;
             if (target != app.selected_platform) {
                 app.selected_platform = target;

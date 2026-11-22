@@ -4,6 +4,58 @@
 #include <stdio.h>
 #include <string.h>
 
+static void test_console_motion(void) {
+    VpUiConsoleMotion m={0};
+    VpUiRect focused,plain,before,after;
+    size_t i;
+    vp_ui_console_motion_update(&m,3,12,1000000,180);
+    focused=vp_ui_console_motion_tile(&m,3);
+    plain=vp_ui_console_tile(3);
+    assert(focused.w==150 && focused.h==187 && focused.y<plain.y);
+    assert(vp_ui_console_motion_touch(&m,focused.x,focused.y)==3);
+    assert(vp_ui_console_motion_touch(&m,focused.x+focused.w-1,focused.y+focused.h-1)==3);
+    assert(vp_ui_console_motion_touch(&m,focused.x,focused.y-1)==-1);
+    assert(vp_ui_console_motion_touch(&m,focused.x+focused.w,focused.y)==-1);
+    vp_ui_console_motion_update(&m,4,12,1100000,180);
+    before=vp_ui_console_motion_tile(&m,3);
+    assert(!memcmp(&before,&focused,sizeof(before)));
+    vp_ui_console_motion_update(&m,4,12,1190000,180);
+    assert(m.scroll>0 && m.scroll<1 && m.lift[3]>0 && m.lift[3]<1 && m.lift[4]>0);
+    before=vp_ui_console_motion_tile(&m,4);
+    assert(vp_ui_console_motion_touch(&m,before.x+before.w/2,before.y+before.h/2)==4);
+    vp_ui_console_motion_update(&m,2,12,1190000,180);
+    after=vp_ui_console_motion_tile(&m,4);
+    assert(!memcmp(&before,&after,sizeof(before)));
+    vp_ui_console_motion_update(&m,2,12,1370000,180);
+    assert(m.scroll==0 && m.lift[2]==1 && m.lift[3]==0 && m.lift[4]==0);
+    /* A direct tap grows its target, never intermediate consoles. */
+    vp_ui_console_motion_update(&m,5,12,1400000,180);
+    vp_ui_console_motion_update(&m,5,12,1490000,180);
+    assert(m.lift[2]>0 && m.lift[5]>0 && m.lift[3]==0 && m.lift[4]==0);
+    vp_ui_console_motion_update(&m,11,12,1500000,0);
+    focused=vp_ui_console_motion_tile(&m,11);
+    assert(m.scroll==6 && focused.x>=24 && focused.x+focused.w<=936);
+    assert(!vp_ui_console_motion_visible(&m,5) && vp_ui_console_motion_visible(&m,6));
+    vp_ui_console_motion_update(&m,0,12,1600000,180);
+    assert(m.scroll==0);
+    vp_ui_console_motion_update(&m,11,12,1700000,180);
+    assert(m.scroll==6);
+    for (i=0;i<=180;i+=15) {
+        size_t j;
+        vp_ui_console_motion_update(&m,11,12,1700000+i*1000,180);
+        for (j=0;j<12;j++) if (vp_ui_console_motion_visible(&m,j)) {
+            VpUiRect r=vp_ui_console_motion_tile(&m,j);
+            assert(r.y>=210 && r.y+r.h<444 && r.w>=136 && r.w<=150);
+        }
+    }
+    vp_ui_console_motion_update(&m,0,1,2000000,180);
+    assert(m.count==1 && m.scroll==0 && m.lift[0]==1);
+    vp_ui_console_motion_update(&m,0,0,2100000,180);
+    assert(vp_ui_console_motion_touch(&m,100,300)==-1);
+    vp_ui_console_motion_update(&m,0,VP_MAX_PLATFORMS+1,2200000,180);
+    assert(m.count==0);
+}
+
 int main(void) {
     VpUiAppearance appearance = {180, 16, 130};
     const char *aliases[][2] = {
@@ -12,6 +64,7 @@ int main(void) {
         {"turbografx-16", "pce"}, {"sms", "mastersystem"}
     };
     size_t i;
+    test_console_motion();
     const char *requested[][2] = {
         {"arcade", "platform_arcade"}, {"dreamcast", "platform_dreamcast"}, {"dc", "platform_dreamcast"},
         {"gba", "platform_gba"}, {"3ds", "platform_n3ds"}, {"n3ds", "platform_n3ds"},

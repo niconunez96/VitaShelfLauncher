@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "vitashelflauncher.h"
 
 typedef struct { int x, y, w, h; } VpUiRect;
 typedef struct { const char *asset; uint32_t rgb; } VpUiPlatform;
@@ -32,6 +33,17 @@ typedef enum {
 #define VP_UI_LIST_PAGE 5
 #define VP_UI_CONSOLE_PAGE 6
 #define VP_UI_CAROUSEL_PAGE 7
+typedef struct {
+    size_t selected, count;
+    unsigned long long changed_at;
+    float scroll, from_scroll;
+    float lift[VP_MAX_PLATFORMS], from_lift[VP_MAX_PLATFORMS];
+} VpUiConsoleMotion;
+void vp_ui_console_motion_update(VpUiConsoleMotion *motion, size_t selected, size_t total,
+                                 unsigned long long now, int duration_ms);
+VpUiRect vp_ui_console_motion_tile(const VpUiConsoleMotion *motion, size_t index);
+bool vp_ui_console_motion_visible(const VpUiConsoleMotion *motion, size_t index);
+int vp_ui_console_motion_touch(const VpUiConsoleMotion *motion, int x, int y);
 const VpUiPlatform *vp_ui_platform(const char *slug);
 const char *vp_ui_platform_label(const char *slug);
 VpUiRect vp_ui_tile(size_t slot);

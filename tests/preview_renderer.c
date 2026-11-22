@@ -25,7 +25,16 @@ static char last_text[768];
 static char frame_text[16384];
 static _Alignas(16) unsigned char pool[1024*1024];
 static size_t pool_used;
+static int clip_x,clip_y,clip_w,clip_h;
 static void source(unsigned int c);
+
+void vita2d_set_clip_rectangle(int x,int y,int xx,int yy) {
+    clip_x=x; clip_y=y; clip_w=xx-x; clip_h=yy-y;
+}
+void vita2d_enable_clipping(void) {
+    cairo_save(cr); cairo_rectangle(cr,clip_x,clip_y,clip_w,clip_h); cairo_clip(cr);
+}
+void vita2d_disable_clipping(void) { cairo_restore(cr); }
 
 void *vita2d_pool_memalign(unsigned int size,unsigned int alignment) {
     size_t start=(pool_used+alignment-1)&~((size_t)alignment-1);
@@ -162,35 +171,39 @@ static void check_console_material(VpUiFrame *frame,VpApp *app,cairo_surface_t *
     size_t i,bytes=(size_t)stride*544;
     unsigned char *snapshot=malloc(bytes),*current;
     VpUiRect first=vp_ui_console_tile(0);
+    VpUiConsoleMotion motion={0};
+    VpUiRect focused;
     assert(snapshot);
     app->active_screen=VP_SCREEN_LIBRARY;
     app->library_level=VP_LEVEL_PLATFORMS;
     frame->group_count=VP_UI_CONSOLE_PAGE;
     app->selected_platform=0;
+    vp_ui_console_motion_update(&motion,0,VP_UI_CONSOLE_PAGE,0,0);
+    focused=vp_ui_console_motion_tile(&motion,0);
     vp_ui_load_theme("ui_motion_ms=0\nui_wallpaper_alpha=0\n");
     strcpy(app->theme.background,"#000000");
     settle(frame); cairo_surface_flush(canvas);
     memcpy(snapshot,cairo_image_surface_get_data(canvas),bytes);
-    app->selected_platform=1;
     strcpy(app->theme.background,"#ffffff");
     settle(frame); cairo_surface_flush(canvas);
     current=cairo_image_surface_get_data(canvas);
-    /* A moving focus and opposite wallpapers must not change any card body pixel.
+    /* Opposite wallpapers must not change any card body pixel, including the lifted card.
      * The ten-pixel inset excludes only the intentionally illuminated perimeter. */
     for (i=0;i<VP_UI_CONSOLE_PAGE;i++) {
-        VpUiRect r=vp_ui_console_tile(i);
+        VpUiRect r=vp_ui_console_motion_tile(&motion,i);
         for (y=10;y<r.h-10;y++) for (x=10;x<r.w-10;x++)
             assert(image_pixel(snapshot,stride,r.x+x,r.y+y)==image_pixel(current,stride,r.x+x,r.y+y));
     }
     /* Compare the exterior outline on the same backdrop, including asset fallbacks. */
+    app->selected_platform=1;
     strcpy(app->theme.background,"#000000");
     settle(frame); cairo_surface_flush(canvas);
     {
         int contrast=0;
         for (y=-2;y<=1;y++) {
-            int focused=brightness(image_pixel(snapshot,stride,first.x+first.w/2,first.y+y));
-            int unfocused=brightness(image_pixel(current,stride,first.x+first.w/2,first.y+y));
-            if (focused-unfocused>contrast) contrast=focused-unfocused;
+            int lit=brightness(image_pixel(snapshot,stride,focused.x+focused.w/2,focused.y+y));
+            int unlit=brightness(image_pixel(current,stride,focused.x+focused.w/2,focused.y+y));
+            if (lit-unlit>contrast) contrast=lit-unlit;
         }
         assert(contrast>100);
     }

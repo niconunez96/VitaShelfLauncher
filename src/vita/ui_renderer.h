@@ -36,5 +36,6 @@ typedef struct {
 void vp_ui_prepare(const VpUiFrame *frame);
 void vp_ui_render(const VpUiFrame *frame);
 void vp_ui_load_theme(const char *ini);
+int vp_ui_touch_platform(int x, int y);
 void vp_ui_shutdown(void);
 #endif

@@ -35,6 +35,9 @@ static unsigned long long notice_at;
 static char last_notice[VP_TEXT];
 static unsigned int last_notice_id;
 static VpUiAppearance appearance={180,14,255};
+static VpUiConsoleMotion console_motion;
+
+int vp_ui_touch_platform(int x,int y) { return vp_ui_console_motion_touch(&console_motion,x,y); }
 
 void vp_ui_load_theme(const char *ini) { vp_ui_appearance_load(&appearance,ini); }
 static unsigned int alpha(unsigned int c,unsigned int a) { return (c&0xffffffu)|(a<<24); }
@@ -173,12 +176,13 @@ static void glass(VpUiRect r,bool selected,bool dark) {
     if (selected) focus(r);
 }
 
-static void console_card(VpUiRect r,bool selected) {
+static void console_card(VpUiRect r,bool selected,float lift) {
     vita2d_texture *material=asset("console_surface"),*ring=selected?asset("console_focus"):NULL;
     int ix,iy;
     float xs[]={r.x-18,r.x+14,r.x+r.w-14,r.x+r.w+18};
     float ys[]={r.y-18,r.y+14,r.y+r.h-14,r.y+r.h+18};
-    round_rect(r.x,r.y+4,r.w,r.h,14,C(10,18,40,45));
+    if (lift>0) round_rect(r.x-4*lift,r.y+6,r.w+8*lift,r.h+4*lift,18,C(8,15,35,(unsigned int)(40*lift)));
+    round_rect(r.x,r.y+4+5*lift,r.w,r.h,14,C(10,18,40,(unsigned int)(45+35*lift)));
     /* Draw the fallback outline underneath the opaque surface, never over its body. */
     if (selected && !ring) round_rect(r.x-2,r.y-2,r.w+4,r.h+4,16,C(174,210,255,255));
     if (material) fit(material,r.x,r.y,r.w,r.h,0xffffffffu);
@@ -218,19 +222,22 @@ static const char *heading_asset(const VpUiFrame *f) {
 
 void vp_ui_prepare(const VpUiFrame *f) {
     static const char *common[]={"focus","ui_buttons","ui_library","ui_store","ui_settings","ui_download","ui_check","ui_star","ui_psx"};
-    size_t i,start;
+    size_t i;
     asset_budget=3;
     for (i=0;i<sizeof(common)/sizeof(common[0]);i++) (void)asset(common[i]);
     if (f->app->active_screen==VP_SCREEN_LIBRARY && f->app->library_level==VP_LEVEL_PLATFORMS) {
+        vp_ui_console_motion_update(&console_motion,f->app->selected_platform,f->group_count,
+            sceKernelGetProcessTimeWide(),appearance.motion_ms);
         (void)asset("console_surface"); (void)asset("console_focus");
-        start=vp_ui_console_start(f->app->selected_platform,f->group_count);
-        for (i=start;i<f->group_count && i<start+VP_UI_CONSOLE_PAGE;i++) (void)asset(vp_ui_platform(f->groups[i].platform)->asset);
+        for (i=0;i<f->group_count;i++) if (vp_ui_console_motion_visible(&console_motion,i))
+            (void)asset(vp_ui_platform(f->groups[i].platform)->asset);
     } else if (f->app->active_screen==VP_SCREEN_SETTINGS) {
+        memset(&console_motion,0,sizeof(console_motion));
         const char *icons[]={"ui_server","ui_download","ui_romm","ui_info","ui_home","ui_key","ui_sync","ui_folder","ui_interface"};
         for (i=0;i<sizeof(icons)/sizeof(icons[0]);i++) (void)asset(icons[i]);
         if (f->settings_detail && f->settings_section==VP_SETTINGS_APPEARANCE)
             for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) (void)asset(vp_ui_wallpaper((int)i)->thumbnail);
-    }
+    } else memset(&console_motion,0,sizeof(console_motion));
     if (heading_asset(f)) (void)asset(heading_asset(f));
     asset_budget=0;
     vp_ui_backdrop_prepare(f->preferences.wallpaper,sceKernelGetProcessTimeWide());
@@ -291,16 +298,25 @@ static void heading(const VpUiFrame *f) {
     }
 }
 
+static void platform_card(const VpUiFrame *f,size_t i) {
+    const VpUiPlatform *platform=vp_ui_platform(f->groups[i].platform);
+    VpUiRect r=vp_ui_console_motion_tile(&console_motion,i);
+    float scale=r.w/136.f;
+    console_card(r,i==f->app->selected_platform,console_motion.lift[i]);
+    fit(asset(platform->asset),r.x+10*scale,r.y+22*scale,r.w-20*scale,116*scale,0xffffffffu);
+    round_rect(r.x+(r.w-42*scale)/2,r.y+r.h-16*scale,42*scale,4*scale,2*scale,rgb(platform->rgb));
+}
+
 static void platforms(const VpUiFrame *f) {
-    size_t start=vp_ui_console_start(f->app->selected_platform,f->group_count),i;
-    for (i=start;i<f->group_count && i<start+VP_UI_CONSOLE_PAGE;i++) {
-        const VpUiPlatform *platform=vp_ui_platform(f->groups[i].platform);
-        VpUiRect r=vp_ui_console_tile(i-start);
-        bool selected=i==f->app->selected_platform;
-        console_card(r,selected);
-        fit(asset(platform->asset),r.x+10,r.y+22,r.w-20,116,0xffffffffu);
-        round_rect(r.x+(r.w-42)/2,r.y+r.h-16,42,4,2,rgb(platform->rgb));
+    size_t i;
+    vita2d_set_clip_rectangle(24,210,944,444);
+    vita2d_enable_clipping();
+    for (i=0;i<f->group_count;i++) {
+        if (i!=f->app->selected_platform && vp_ui_console_motion_visible(&console_motion,i)) platform_card(f,i);
     }
+    if (vp_ui_console_motion_visible(&console_motion,f->app->selected_platform))
+        platform_card(f,f->app->selected_platform);
+    vita2d_disable_clipping();
     if (f->group_count) {
         const VpPlatformGroup *group=&f->groups[f->app->selected_platform]; char detail[VP_TEXT+40];
         (void)snprintf(detail,sizeof(detail),"%s  ·  %u juegos",group->display,(unsigned)group->count);
@@ -619,4 +635,5 @@ void vp_ui_shutdown(void) {
         assets[i].texture=NULL; assets[i].attempted=false;
     }
     last_notice[0]='\0'; last_notice_id=0;
+    memset(&console_motion,0,sizeof(console_motion));
 }

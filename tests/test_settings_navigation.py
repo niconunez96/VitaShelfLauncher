@@ -124,6 +124,8 @@ static bool settings_detail_active, settings_romm_active;
 static bool settings_ime_active;
 static VpApp app;
 static size_t platform_group_count,visible_count_cache,visible_indexes[256];
+static VpUiConsoleMotion console_motion;
+static int vp_ui_touch_platform(int x,int y) { return vp_ui_console_motion_touch(&console_motion,x,y); }
 static VpUiPreferences ui_preferences=VP_UI_PREFERENCES_DEFAULT;
 static bool save_ok=true;
 static int saves;
@@ -245,6 +247,20 @@ int main(void) {
     assert(ui_preferences.animated!=animated);
     handle_settings_input(&app,touch_navigation_pressed(630,513));
     assert(!settings_detail_active);
+    app.active_screen=VP_SCREEN_LIBRARY;
+    app.library_level=VP_LEVEL_PLATFORMS;
+    app.selected_platform=6; platform_group_count=12;
+    vp_ui_console_motion_update(&console_motion,6,12,1000000,180);
+    row=vp_ui_console_motion_tile(&console_motion,6);
+    assert(touch_navigation_pressed(row.x+row.w/2,row.y)==SCE_CTRL_CROSS);
+    row=vp_ui_console_motion_tile(&console_motion,8);
+    assert(touch_navigation_pressed(row.x+row.w/2,row.y+row.h/2)==0);
+    assert(app.selected_platform==8); /* animated hit returns an absolute index, not a slot */
+    vp_ui_console_motion_update(&console_motion,8,12,1100000,180);
+    vp_ui_console_motion_update(&console_motion,8,12,1190000,180);
+    row=vp_ui_console_motion_tile(&console_motion,6);
+    assert(touch_navigation_pressed(row.x+row.w/2,row.y+row.h/2)==0);
+    assert(app.selected_platform==6);
     puts("Settings controller/touch navigation, appearance, nested RomM and download actions: PASS");
 }
 '''

@@ -74,6 +74,50 @@ VpUiRect vp_ui_console_tile(size_t slot) {
     return r;
 }
 
+void vp_ui_console_motion_update(VpUiConsoleMotion *m, size_t selected, size_t total,
+                                 unsigned long long now, int duration_ms) {
+    size_t i;
+    float progress, target;
+    if (!total || total>VP_MAX_PLATFORMS || selected>=total) {
+        memset(m,0,sizeof(*m));
+        return;
+    }
+    target=(float)vp_ui_console_start(selected,total);
+    if (m->count!=total || duration_ms<=0) {
+        memset(m,0,sizeof(*m));
+        m->count=total; m->selected=selected; m->changed_at=now;
+        m->scroll=m->from_scroll=target;
+        m->lift[selected]=m->from_lift[selected]=1;
+        return;
+    }
+    progress=vp_ui_ease(now>=m->changed_at?(float)(now-m->changed_at)/(duration_ms*1000.f):0);
+    m->scroll=m->from_scroll+((float)vp_ui_console_start(m->selected,total)-m->from_scroll)*progress;
+    for (i=0;i<total;i++)
+        m->lift[i]=m->from_lift[i]+((i==m->selected?1.f:0.f)-m->from_lift[i])*progress;
+    if (m->selected==selected) return;
+    /* Wrapping skips the intervening pages instead of sweeping the whole catalog. */
+    if ((selected==0 && m->selected==total-1) || (selected==total-1 && m->selected==0))
+        m->scroll=target;
+    m->from_scroll=m->scroll;
+    memcpy(m->from_lift,m->lift,sizeof(m->lift));
+    m->selected=selected; m->changed_at=now;
+}
+
+VpUiRect vp_ui_console_motion_tile(const VpUiConsoleMotion *m, size_t index) {
+    VpUiRect r=vp_ui_console_tile(0);
+    float lift=index<m->count?m->lift[index]:0;
+    float scale=1+.10f*lift;
+    r.x=(int)lroundf(r.x+((float)index-m->scroll)*148-r.w*(scale-1)/2);
+    r.y=(int)lroundf(r.y-8*lift-r.h*(scale-1)/2);
+    r.w=(int)lroundf(r.w*scale); r.h=(int)lroundf(r.h*scale);
+    return r;
+}
+
+bool vp_ui_console_motion_visible(const VpUiConsoleMotion *m, size_t index) {
+    return index<m->count && (float)index>=floorf(m->scroll) &&
+        (float)index<ceilf(m->scroll)+VP_UI_CONSOLE_PAGE;
+}
+
 VpUiRect vp_ui_list_row(size_t slot) {
     VpUiRect r = {64, 170 + (int)slot * 54, 284, 48};
     return r;
@@ -98,6 +142,18 @@ VpUiRect vp_ui_settings_content_card(void) {
 
 static bool inside(VpUiRect r, int x, int y) {
     return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h;
+}
+
+int vp_ui_console_motion_touch(const VpUiConsoleMotion *m, int x, int y) {
+    size_t i;
+    if (!m->count || x<24 || x>=944) return -1;
+    if (vp_ui_console_motion_visible(m,m->selected) &&
+        inside(vp_ui_console_motion_tile(m,m->selected),x,y)) return (int)m->selected;
+    /* Reverse paint order: the selected card is above all other cards. */
+    for (i=m->count;i>0;i--)
+        if (i-1!=m->selected && vp_ui_console_motion_visible(m,i-1) &&
+            inside(vp_ui_console_motion_tile(m,i-1),x,y)) return (int)i-1;
+    return -1;
 }
 
 const VpUiWallpaper *vp_ui_wallpaper(int index) {
