@@ -1,12 +1,19 @@
 CC ?= gcc
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -pedantic -Iinclude
-CORE = src/core/vitashelflauncher.c src/core/vita_titles.c src/core/integrations.c
+CORE = src/core/vitashelflauncher.c src/core/vita_titles.c src/core/integrations.c src/core/library_preferences.c
 TEST = build/test_core
 
-.PHONY: test test-integrations test-local-library test-ui test-vita-lifecycle test-assets test-renderer test-release-automation clean
+.PHONY: test test-preferences test-integrations test-local-library test-ui test-vita-lifecycle test-assets test-renderer test-release-automation clean
 
-test: $(TEST) test-integrations test-local-library test-ui test-vita-lifecycle test-release-automation
+test: $(TEST) test-preferences test-integrations test-local-library test-ui test-vita-lifecycle test-release-automation
 	$(TEST)
+
+test-preferences: build/test_library_preferences
+	build/test_library_preferences
+
+build/test_library_preferences: src/core/library_preferences.c src/core/vitashelflauncher.c include/library_preferences.h include/vitashelflauncher.h tests/test_library_preferences.c
+	@mkdir -p build
+	$(CC) $(CFLAGS) src/core/library_preferences.c src/core/vitashelflauncher.c tests/test_library_preferences.c -o $@
 
 test-integrations: build/test_integrations
 	build/test_integrations
@@ -40,6 +47,8 @@ test-vita-lifecycle:
 	python3 tests/test_artwork_worker.py
 	python3 tests/test_settings_navigation.py
 	python3 tests/test_vita_touch_navigation.py
+	python3 tests/test_library_independent.py
+	python3 tests/test_cache_compatibility_independent.py
 
 build/test_presentation: src/vita/ui_presentation.c src/vita/ui_presentation.h tests/test_presentation.c
 	@mkdir -p build

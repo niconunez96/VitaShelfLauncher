@@ -192,7 +192,8 @@ int main(void) {
 #include <stdio.h>
 #include <string.h>
 enum { SCE_CTRL_UP=1, SCE_CTRL_DOWN=2, SCE_CTRL_CROSS=4, SCE_CTRL_CIRCLE=8,
-       SCE_CTRL_SQUARE=16, SCE_CTRL_TRIANGLE=32, SCE_CTRL_LEFT=64, SCE_CTRL_RIGHT=128 };
+       SCE_CTRL_SQUARE=16, SCE_CTRL_TRIANGLE=32, SCE_CTRL_LEFT=64, SCE_CTRL_RIGHT=128,
+       SCE_CTRL_SELECT=256 };
 enum { VP_UI_SOUND_NAVIGATION, VP_UI_SOUND_ENTER, VP_UI_SOUND_BACK, VP_UI_SOUND_TAB,
        VP_JOB_DOWNLOAD_ROM, VP_JOB_PAIR_AND_SYNC, VP_JOB_CHECK_STEAMGRID, VP_JOB_CHECK_IMAGES };
 static int settings_section, settings_field, checks, syncs;
@@ -203,6 +204,10 @@ static bool settings_ime_active;
 static VpApp app;
 static size_t platform_group_count,visible_count_cache,visible_indexes[256];
 static size_t list_start,grid_start;
+static VpLibraryModal library_modal=VP_LIBRARY_MODAL_NONE;
+static size_t library_modal_row;
+static float panel_progress=1.f;
+static float library_modal_progress(void) { return panel_progress; }
 static VpUiConsoleMotion console_motion;
 static int vp_ui_touch_platform(int x,int y) { return vp_ui_console_motion_touch(&console_motion,x,y); }
 static VpUiPreferences ui_preferences=VP_UI_PREFERENCES_DEFAULT;
@@ -360,6 +365,9 @@ int main(void) {
     assert(!settings_detail_active);
     app.active_screen=VP_SCREEN_LIBRARY;
     app.library_level=VP_LEVEL_PLATFORMS;
+    assert(touch_navigation_pressed(775,513)==SCE_CTRL_SELECT);
+    assert(touch_navigation_pressed(850,513)==SCE_CTRL_SELECT);
+    assert(touch_navigation_pressed(366,513)==SCE_CTRL_CROSS);
     app.selected_platform=6; platform_group_count=12;
     vp_ui_console_motion_update(&console_motion,6,12,1000000,180);
     row=vp_ui_console_motion_tile(&console_motion,6);
@@ -373,6 +381,22 @@ int main(void) {
     assert(touch_navigation_pressed(row.x+row.w/2,row.y+row.h/2)==0);
     assert(app.selected_platform==6);
     app.library_level=VP_LEVEL_ROMS; app.active_view=VP_VIEW_LIST;
+    assert(library_modal_progress()==1.f);
+    assert(touch_navigation_pressed(366,513)==SCE_CTRL_TRIANGLE);
+    assert(touch_navigation_pressed(510,513)==SCE_CTRL_SQUARE);
+    assert(touch_navigation_pressed(675,513)==SCE_CTRL_SELECT);
+    assert(touch_navigation_pressed(750,513)==SCE_CTRL_SELECT);
+    assert(touch_navigation_pressed(810,513)==SCE_CTRL_CIRCLE);
+    library_modal=VP_LIBRARY_MODAL_ACTIONS;
+    for (int step=2;step<=4;step++) {
+        panel_progress=(float)step/4;
+        row=vp_ui_library_panel_row(1,panel_progress);
+        assert(touch_navigation_pressed(row.x+4,row.y+4)==SCE_CTRL_CROSS);
+        assert(library_modal_row==1);
+    }
+    row=vp_ui_library_panel(1.f);
+    assert(touch_navigation_pressed(row.x+306,row.y+row.h-38)==SCE_CTRL_CIRCLE);
+    library_modal=VP_LIBRARY_MODAL_NONE;
     visible_count_cache=8; list_start=5;
     for (size_t i=0;i<8;i++) visible_indexes[i]=20+i;
     app.selected_item=25;
@@ -404,10 +428,58 @@ int main(void) {
             )
             subprocess.run([str(probe)], check=True, timeout=5)
 
+    def test_select_filters_from_platforms_and_roms(self):
+        source = (ROOT / "src/vita/main.c").read_text()
+        start = source.index("if (app.library_level != VP_LEVEL_ROMS)", source.index("int main(void)"))
+        end = source.index("\n                if ((pressed & SCE_CTRL_SQUARE)", start)
+        shortcuts = source[start:end]
+        prefix = r'''
+#include "vitashelflauncher.h"
+#include "ui_presentation.h"
+#include <assert.h>
+#include <stdio.h>
+enum { SCE_CTRL_TRIANGLE=32, SCE_CTRL_SELECT=256, VP_UI_SOUND_ENTER=1 };
+static VpApp app;
+static unsigned int pressed;
+static VpLibraryModal modal;
+static int saves;
+static bool save_romm_config(void) { saves++; return true; }
+static void show_notification(VpApp *value,const char *format,...) { (void)value; (void)format; }
+static void open_library_modal(VpLibraryModal value) { modal=value; }
+static void vp_ui_audio_play(int sound) { (void)sound; }
+static void apply_shortcuts(void) {
+'''
+        suffix = r'''
+}
+int main(void) {
+    vp_app_init(&app);
+    VpView original=app.active_view;
+    pressed=SCE_CTRL_SELECT; apply_shortcuts();
+    assert(modal==VP_LIBRARY_MODAL_FILTERS && pressed==0);
+    assert(app.library_level==VP_LEVEL_PLATFORMS && app.active_view==original && saves==0);
+    modal=VP_LIBRARY_MODAL_NONE; pressed=SCE_CTRL_TRIANGLE; apply_shortcuts();
+    assert(modal==VP_LIBRARY_MODAL_NONE && app.active_view==original && saves==0);
+    app.library_level=VP_LEVEL_ROMS;
+    pressed=SCE_CTRL_SELECT; apply_shortcuts();
+    assert(modal==VP_LIBRARY_MODAL_FILTERS && pressed==0 && saves==0);
+    pressed=SCE_CTRL_TRIANGLE; apply_shortcuts();
+    assert(app.active_view!=original && saves==1);
+    puts("Select opens shared filters at both library levels; Triangle remains ROM-only: PASS");
+}
+'''
+        with tempfile.TemporaryDirectory(prefix="vitashelf-library-shortcuts-") as temporary:
+            probe = pathlib.Path(temporary) / "shortcuts"
+            subprocess.run(
+                ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
+                 "-Iinclude", "-Isrc/vita", "-x", "c", "-", "src/core/vitashelflauncher.c", "-lm", "-o", str(probe)],
+                cwd=ROOT, input=prefix + shortcuts + suffix, text=True, check=True,
+            )
+            subprocess.run([str(probe)], check=True, timeout=5)
+
     def test_triangle_view_change_saves_and_rolls_back(self):
         source = (ROOT / "src/vita/main.c").read_text()
         start = source.index("if (pressed & SCE_CTRL_TRIANGLE) {", source.index("int main(void)"))
-        end = source.index("\n                if ((pressed & SCE_CTRL_SQUARE)", start)
+        end = source.index("\n                if (pressed & SCE_CTRL_SELECT)", start)
         toggle = source[start:end]
         prefix = r'''
 #include "vitashelflauncher.h"

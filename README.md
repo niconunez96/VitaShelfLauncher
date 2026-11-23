@@ -54,6 +54,10 @@ El código se usa una sola vez. No compartas el archivo de configuración de la 
 
 Los ajustes se ordenan en **Integraciones**, **Descargas**, **Apariencia** y **Acerca de**. En **Apariencia**, elige uno de los cuatro fondos con la cruceta y `X`, o toca su miniatura. **Fondo animado** muestra un interruptor para activar o desactivar el vaivén continuo del fondo; cámbialo con `X` o tocando la fila. Todos los ajustes de apariencia se guardan automáticamente. La vista de ROM elegida con `Triángulo` (cuadrícula, lista o carrusel) también se guarda y se restaura al reiniciar. En **Acerca de** puedes consultar la versión, el espacio libre y las rutas de almacenamiento; si RomM está conectado, también verás el servidor, la cantidad de juegos de su catálogo y la última sincronización. Si aún no hay un catálogo sincronizado para ese servidor, se indica sin mostrar datos de otro servidor.
 
+### 3. Favoritos y filtros de biblioteca
+
+Presiona `SELECT` en la página principal de Biblioteca o dentro de una consola para abrir **Filtros**. Puedes mostrar juegos ocultos o limitar la biblioteca a juegos descargados; los filtros se comparten entre todas las consolas y se conservan al reiniciar. Dentro de una consola, `Cuadrado` abre las opciones para añadir o quitar favoritos y ocultar o mostrar el juego seleccionado. **Favoritos** aparece como la primera tarjeta de Biblioteca. Los juegos ocultos se muestran atenuados con un ojo tachado cuando el filtro permite verlos.
+
 ## English
 
 ### 1. Install
@@ -86,6 +90,10 @@ For cover artwork, open **Settings → Integrations**:
 2. **SteamGridDB**: enter your [API key](https://www.steamgriddb.com/profile/preferences/api), select **Test connection**, then **Sync covers** (`Sincronizar carátulas`). These settings save automatically. The key is masked in the settings page; keep your real configuration file private.
 
 Artwork is resized through the shared image service and cached on the Vita. Only unambiguous name matches are selected; missing or ambiguous artwork keeps the installed application's icon. For locally installed titles, successful matches are remembered by title ID.
+
+### 4. Favourites and library filters
+
+Press `SELECT` on the main Library page or inside a console to open **Filters**. Show hidden games or limit the library to downloaded games; filters are shared across consoles and saved across restarts. Inside a console, `Square` opens options to add or remove a favourite and hide or show the selected game. **Favourites** is the first Library card. When hidden games are shown, their cards are dimmed with a crossed-eye icon.
 
 ## Development
 

@@ -52,7 +52,9 @@ static void test_console_motion(void) {
     assert(m.count==1 && m.scroll==0 && m.lift[0]==1);
     vp_ui_console_motion_update(&m,0,0,2100000,180);
     assert(vp_ui_console_motion_touch(&m,100,300)==-1);
-    vp_ui_console_motion_update(&m,0,VP_MAX_PLATFORMS+1,2200000,180);
+    vp_ui_console_motion_update(&m,VP_MAX_LIBRARY_GROUPS-1,VP_MAX_LIBRARY_GROUPS,2200000,0);
+    assert(m.count==VP_MAX_LIBRARY_GROUPS && m.lift[VP_MAX_LIBRARY_GROUPS-1]==1);
+    vp_ui_console_motion_update(&m,0,VP_MAX_LIBRARY_GROUPS+1,2250000,180);
     assert(m.count==0);
     vp_ui_console_motion_update(&m,4,12,2300000,180);
     vp_ui_console_motion_drag(&m,3.5f,2310000);
@@ -292,8 +294,29 @@ int main(void) {
     assert(vp_ui_touch_dock_screen(330,20)==2);
     assert(vp_ui_touch_dock_screen(454,20)==-1);
     assert(vp_ui_touch_dock_screen(90,500)==-1);
-    assert(vp_ui_touch_view_toggle(824,513));
+    assert(vp_ui_touch_view_toggle(815,513));
     assert(!vp_ui_touch_view_toggle(803,513));
+    {
+        VpUiRect closed=vp_ui_library_panel(0.f),open=vp_ui_library_panel(1.f);
+        assert(closed.x>=960 && open.x>480 && open.x+open.w<=936);
+        assert(vp_ui_library_panel(-1.f).x==closed.x);
+        assert(vp_ui_library_panel(2.f).x==open.x);
+        for (int step=0;step<=4;step++) {
+            float progress=(float)step/4;
+            VpUiRect panel=vp_ui_library_panel(progress);
+            assert(panel.x<=closed.x && panel.x>=open.x);
+            for (size_t row=0;row<VP_LIBRARY_ACTIONS_ROWS;row++) {
+                VpUiRect r=vp_ui_library_panel_row(row,progress);
+                assert(r.x>=panel.x+24 && r.x+r.w<=panel.x+panel.w-24);
+                assert(r.y>=panel.y+90 && r.y+r.h<panel.y+panel.h-70);
+                assert(vp_ui_touch_library_panel_row(progress,r.x,r.y)==(int)row);
+                assert(vp_ui_touch_library_panel_row(progress,r.x+r.w-1,r.y+r.h-1)==(int)row);
+                assert(vp_ui_touch_library_panel_row(progress,r.x+r.w,r.y)==-1);
+                assert(vp_ui_touch_library_panel_row(progress,r.x,r.y+r.h)==-1);
+            }
+        }
+        assert(vp_ui_touch_library_panel_row(1.f,50,160)==-1);
+    }
     assert(vp_ui_touch_back(613,513));
     assert(!vp_ui_touch_back(599,513));
     assert(vp_ui_touch_carousel_offset(480,220)==0);

@@ -227,6 +227,7 @@ static const char *heading_asset(const VpUiFrame *f) {
     const char *logo=platform_asset(f);
     if (!logo) return NULL;
     if (!strcmp(logo,"platform_psx")) return "ui_psx";
+    if (!strcmp(logo,"ui_star")) return "ui_star";
     (void)snprintf(name,sizeof(name),"header_%s",logo+9);
     return name;
 }
@@ -311,10 +312,13 @@ static void heading(const VpUiFrame *f) {
     char subtitle[96]; const char *title="Biblioteca",*logo=heading_asset(f);
     if (f->app->active_screen!=VP_SCREEN_LIBRARY) return;
     if (f->app->library_level==VP_LEVEL_ROMS) {
-        title=f->visible_count?f->app->catalog.items[f->visible[position(f)]].platform_display:f->app->active_platform;
+        if (!strcmp(f->app->active_platform,VP_FAVORITES_PLATFORM)) title=VP_FAVORITES_DISPLAY;
+        else title=f->visible_count?f->app->catalog.items[f->visible[position(f)]].platform_display:f->app->active_platform;
         (void)snprintf(subtitle,sizeof(subtitle),"%u juegos",(unsigned)f->visible_count);
     } else (void)snprintf(subtitle,sizeof(subtitle),"%u consolas   •   %u juegos",(unsigned)f->group_count,(unsigned)f->app->catalog.count);
-    if (logo && !strcmp(logo,"ui_psx")) icon(logo,61,81,54);
+    if (logo && !strcmp(logo,"ui_star"))
+        fit(asset(logo),74,94,28,28,C(185,204,234,210));
+    else if (logo && !strcmp(logo,"ui_psx")) icon(logo,61,81,54);
     else if (logo) fit(asset(logo),24,76,128,64,0xffffffffu);
     text(f,VP_TYPE_PAGE_TITLE,172,115,620,wall_primary,title);
     text(f,VP_TYPE_PAGE_SUBTITLE,173,140,610,wall_muted,subtitle);
@@ -329,7 +333,11 @@ static void platform_card(const VpUiFrame *f,size_t i) {
     VpUiRect r=vp_ui_console_motion_tile(&console_motion,i);
     float scale=r.w/136.f;
     console_card(r,i==f->app->selected_platform,console_motion.lift[i]);
-    fit(asset(platform->asset),r.x+10*scale,r.y+22*scale,r.w-20*scale,116*scale,0xffffffffu);
+    if (!strcmp(platform->asset,"ui_star")) {
+        float size=40*scale;
+        fit(asset(platform->asset),r.x+(r.w-size)/2,r.y+(r.h-size)/2-6*scale,
+            size,size,C(185,204,234,210));
+    } else fit(asset(platform->asset),r.x+10*scale,r.y+22*scale,r.w-20*scale,116*scale,0xffffffffu);
     round_rect(r.x+(r.w-42*scale)/2,r.y+r.h-16*scale,42*scale,4*scale,2*scale,rgb(platform->rgb));
 }
 
@@ -350,6 +358,32 @@ static void platforms(const VpUiFrame *f) {
     }
 }
 
+static void hidden_overlay(VpUiRect r) {
+    float size=fminf(36.f,fminf(r.w,r.h)*.55f);
+    float cx=r.x+r.w/2.f,cy=r.y+r.h/2.f;
+    const unsigned int ink=C(211,222,239,255),disc=C(18,27,46,255);
+    round_rect(r.x,r.y,r.w,r.h,10,C(8,14,28,170));
+    vita2d_draw_fill_circle(cx,cy,size*.68f,disc);
+    /* Outline eye and diagonal slash, scaled down for list thumbnails. */
+    for (int side=-1;side<=1;side+=2) {
+        for (int step=0;step<12;step++) {
+            float t=step/12.f,next=(step+1)/12.f;
+            float x=cx+(t-.5f)*size,xx=cx+(next-.5f)*size;
+            float y=cy+side*sinf(t*3.14159265f)*size*.27f;
+            float yy=cy+side*sinf(next*3.14159265f)*size*.27f;
+            vita2d_draw_line(x,y-.5f,xx,yy-.5f,ink);
+            vita2d_draw_line(x,y+.5f,xx,yy+.5f,ink);
+        }
+    }
+    vita2d_draw_fill_circle(cx,cy,size*.13f,ink);
+    vita2d_draw_fill_circle(cx,cy,size*.075f,disc);
+    for (int offset=-2;offset<=2;offset++)
+        vita2d_draw_line(cx-size*.43f,cy-size*.43f+offset,
+                         cx+size*.43f,cy+size*.43f+offset,disc);
+    vita2d_draw_line(cx-size*.43f,cy-size*.43f-.5f,cx+size*.43f,cy+size*.43f-.5f,ink);
+    vita2d_draw_line(cx-size*.43f,cy-size*.43f+.5f,cx+size*.43f,cy+size*.43f+.5f,ink);
+}
+
 static void cover(vita2d_texture *texture,const VpItem *item,VpUiRect r,unsigned int tint) {
     round_rect(r.x,r.y,r.w,r.h,10,C(17,31,65,225));
     if (texture) fit(texture,r.x+3,r.y+3,r.w-6,r.h-6,tint);
@@ -357,6 +391,7 @@ static void cover(vita2d_texture *texture,const VpItem *item,VpUiRect r,unsigned
         fit(asset(vp_ui_platform(item->platform)->asset),r.x+12,r.y+r.h*.2f,r.w-24,r.h*.4f,0xffffffffu);
         /* Missing artwork remains identifiable and actionable offline. */
     }
+    if (item->hidden) hidden_overlay(r);
 }
 
 static void carousel_card(const VpUiFrame *f,int position,int base) {
@@ -432,7 +467,9 @@ static void roms(const VpUiFrame *f) {
             VpUiRect r=vp_ui_scrolled_list_row(i,scroll); bool active=i==pos;
             if (active) glass(r,true,false);
             fit(f->covers[i-start],r.x+10,r.y+4,38,40,0xffffffffu);
-            vp_ui_text(f->font,VP_TYPE_LIST_TITLE,active,r.x+62,r.y+29,r.w-74,panel_primary,item->title);
+            vp_ui_text(f->font,VP_TYPE_LIST_TITLE,active,r.x+62,r.y+29,r.w-74,
+                       item->hidden?alpha(panel_primary,140):panel_primary,item->title);
+            if (item->hidden) hidden_overlay((VpUiRect){r.x+10,r.y+4,38,40});
         }
         vita2d_disable_clipping();
         if ((float)pos>=scroll && (float)pos<scroll+VP_UI_LIST_PAGE)
@@ -661,6 +698,74 @@ static void settings(const VpUiFrame *f) {
     }
 }
 
+/* Reuse the footer's face-button atlas in the library panel. */
+static void button(int kind,int x,int y);
+
+static void dpad(int x,int y) {
+    const unsigned int edge=C(88,102,126,255),body=C(27,35,49,255),arrow=C(192,204,224,255);
+    round_rect(x-13,y-6,26,12,3,edge);
+    round_rect(x-6,y-13,12,26,3,edge);
+    round_rect(x-12,y-5,24,10,2,body);
+    round_rect(x-5,y-12,10,24,2,body);
+    vita2d_draw_line(x-2,y-8,x,y-10,arrow); vita2d_draw_line(x,y-10,x+2,y-8,arrow);
+    vita2d_draw_line(x-2,y+8,x,y+10,arrow); vita2d_draw_line(x,y+10,x+2,y+8,arrow);
+    vita2d_draw_line(x-8,y-2,x-10,y,arrow); vita2d_draw_line(x-10,y,x-8,y+2,arrow);
+    vita2d_draw_line(x+8,y-2,x+10,y,arrow); vita2d_draw_line(x+10,y,x+8,y+2,arrow);
+}
+
+static void select_button(const VpUiFrame *f,int x,int y) {
+    vita2d_font *font=f->font->weights[1];
+    int width=vita2d_font_text_width(font,10,"SELECT");
+    round_rect(x-27,y-11,54,22,10,C(88,102,126,255));
+    round_rect(x-26,y-10,52,20,9,C(27,35,49,255));
+    vita2d_font_draw_text(font,x-width/2,y+4,C(210,221,240,255),10,"SELECT");
+}
+
+static void render_library_modal(const VpUiFrame *f) {
+    static const char *actions[]={"Quitar de Favoritos","Añadir a Favoritos","Ocultar juego",
+                                  "Mostrar juego","Cerrar"};
+    static const char *filters[]={"Ocultar juegos ocultos","Mostrar juegos ocultos",
+                                  "Mostrar todos los juegos","Solo juegos descargados","Cerrar"};
+    const VpUiRect card=vp_ui_library_panel(f->library_modal_progress);
+    const VpItem *item=f->visible_count && f->app->selected_item<f->app->catalog.count?
+        &f->app->catalog.items[f->app->selected_item]:NULL;
+    const char *title=f->library_modal==VP_LIBRARY_MODAL_ACTIONS?"Acciones del juego":"Filtros de biblioteca";
+    const unsigned int primary=C(243,247,255,255),secondary=C(185,200,226,255);
+    const int hint_y=card.y+card.h-38;
+    int rows;
+    int index;
+    vita2d_draw_rectangle(0,0,960,544,C(5,11,28,190));
+    round_rect(card.x,card.y,card.w,card.h,20,C(12,19,40,255));
+    /* Text coordinates are baselines: leave room above the 30px title glyphs. */
+    text(f,VP_TYPE_PAGE_TITLE,card.x+24,card.y+54,card.w-48,primary,title);
+    rows=f->library_modal==VP_LIBRARY_MODAL_ACTIONS?VP_LIBRARY_ACTIONS_ROWS:VP_LIBRARY_FILTERS_ROWS;
+    for (index=0;index<rows;index++) {
+        VpUiRect r=vp_ui_library_panel_row((size_t)index,f->library_modal_progress);
+        bool selected=(size_t)index==f->library_modal_row;
+        const char *label;
+        if (f->library_modal==VP_LIBRARY_MODAL_ACTIONS) {
+            if (index==0) label=item && item->favorite?actions[0]:actions[1];
+            else if (index==1) label=item && item->hidden?actions[3]:actions[2];
+            else label=actions[4];
+        } else {
+            if (index==0) label=f->app->library_filters.show_hidden?filters[0]:filters[1];
+            else if (index==1) label=f->app->library_filters.downloaded_only?filters[2]:filters[3];
+            else label=filters[4];
+        }
+        if (selected) {
+            round_rect(r.x,r.y,r.w,r.h,12,C(40,56,86,255));
+            round_rect(r.x+2,r.y+14,3,r.h-28,1,C(113,208,255,255));
+        }
+        vp_ui_text(f->font,VP_TYPE_SETTINGS_ROW,selected,r.x+18,r.y+33,r.w-36,primary,label);
+    }
+    dpad(card.x+36,hint_y);
+    text(f,VP_TYPE_FOOTER,card.x+55,hint_y+5,76,secondary,"Elegir");
+    button(0,card.x+168,hint_y);
+    text(f,VP_TYPE_FOOTER,card.x+186,hint_y+5,88,secondary,"Activar");
+    button(1,card.x+306,hint_y);
+    text(f,VP_TYPE_FOOTER,card.x+324,hint_y+5,92,secondary,"Cerrar");
+}
+
 /* One small atlas preserves smooth colored outlines at the native footer size. */
 static void button(int kind,int x,int y) {
     vita2d_texture *texture=asset("ui_buttons");
@@ -692,13 +797,25 @@ static void footer(const VpUiFrame *f) {
         action=f->settings_field==VP_UI_APPEARANCE_MOTION_SLOT?"Activar / Desactivar":
                f->settings_field==VP_UI_APPEARANCE_TEXT_COLOR_SLOT?"Cambiar color":"Aplicar fondo";
     if (f->app->active_screen==VP_SCREEN_SETTINGS && !f->settings_detail) action="Seleccionar";
-    button(0,366,513); text(f,VP_TYPE_FOOTER,383,518,210,C(12,32,76,255),action);
-    button(1,613,513); text(f,VP_TYPE_FOOTER,630,518,64,C(12,32,76,255),"Volver");
-    if (roms || downloads) {
-        button(2,713,513); text(f,VP_TYPE_FOOTER,730,518,76,C(12,32,76,255),downloads?"Quitar":"Favorito");
-    }
-    if (roms || connection) {
-        button(3,815,513); text(f,VP_TYPE_FOOTER,832,518,102,C(12,32,76,255),connection?"Guardar":"Cambiar vista");
+    if (roms) {
+        button(3,366,513); text(f,VP_TYPE_FOOTER,383,518,62,C(12,32,76,255),"Vista");
+        button(2,510,513); text(f,VP_TYPE_FOOTER,527,518,104,C(12,32,76,255),"Opciones");
+        select_button(f,675,513);
+        text(f,VP_TYPE_FOOTER,710,518,62,C(12,32,76,255),"Filtros");
+        button(1,790,513); text(f,VP_TYPE_FOOTER,807,518,64,C(12,32,76,255),"Volver");
+    } else {
+        button(0,366,513); text(f,VP_TYPE_FOOTER,383,518,210,C(12,32,76,255),action);
+        button(1,613,513); text(f,VP_TYPE_FOOTER,630,518,64,C(12,32,76,255),"Volver");
+        if (f->app->active_screen==VP_SCREEN_LIBRARY) {
+            select_button(f,775,513);
+            text(f,VP_TYPE_FOOTER,810,518,62,C(12,32,76,255),"Filtros");
+        }
+        if (downloads) {
+            button(2,713,513); text(f,VP_TYPE_FOOTER,730,518,56,C(12,32,76,255),"Quitar");
+        }
+        if (connection) {
+            button(3,815,513); text(f,VP_TYPE_FOOTER,832,518,102,C(12,32,76,255),"Guardar");
+        }
     }
 }
 
@@ -720,6 +837,7 @@ void vp_ui_render(const VpUiFrame *f) {
     } else if (f->app->active_screen==VP_SCREEN_SETTINGS) settings(f);
     else empty(f,"ui_store","Próximamente","Tu biblioteca y RomM siguen disponibles con L / R.");
     footer(f);
+    if (f->library_modal!=VP_LIBRARY_MODAL_NONE) render_library_modal(f);
     if (f->notice_id != last_notice_id) {
         last_notice_id=f->notice_id;
         (void)snprintf(last_notice,sizeof(last_notice),"%s",f->app->notice); notice_at=now;

@@ -6,6 +6,9 @@
 
 #define VP_MAX_ITEMS 256
 #define VP_MAX_PLATFORMS 64
+#define VP_MAX_LIBRARY_GROUPS (VP_MAX_PLATFORMS + 1)
+#define VP_FAVORITES_PLATFORM "__favorites__"
+#define VP_FAVORITES_DISPLAY "Favoritos"
 #define VP_TEXT 192
 #define VP_URL 384
 #define VP_PATH 256
@@ -67,7 +70,13 @@ typedef struct {
     bool multi_file;
     unsigned long last_played;
     char background_url[VP_URL];
+    bool hidden;
 } VpItem;
+
+typedef struct {
+    bool show_hidden;
+    bool downloaded_only;
+} VpLibraryFilters;
 
 typedef enum {
     VP_DOWNLOAD_PENDING,
@@ -120,6 +129,7 @@ typedef struct {
     VpCatalog catalog;
     VpTheme theme;
     char query[VP_MAX_QUERY];
+    VpLibraryFilters library_filters;
     VpView active_view;
     VpScreen active_screen;
     VpLibraryLevel library_level;
@@ -231,9 +241,15 @@ size_t vp_catalog_search(const VpCatalog *catalog, const char *query,
                          size_t *indexes, size_t capacity);
 size_t vp_catalog_recent(const VpCatalog *catalog, size_t *indexes, size_t capacity);
 size_t vp_catalog_platforms(const VpCatalog *catalog, VpPlatformGroup *groups, size_t capacity);
+size_t vp_catalog_library_platforms(const VpCatalog *catalog, const VpLibraryFilters *filters,
+                                    VpPlatformGroup *groups, size_t capacity);
 size_t vp_catalog_platform_items(const VpCatalog *catalog, const char *platform,
                                  size_t *indexes, size_t capacity);
+size_t vp_catalog_library_items(const VpCatalog *catalog, const char *platform,
+                                const VpLibraryFilters *filters, size_t *indexes, size_t capacity);
+bool vp_library_item_visible(const VpItem *item, const VpLibraryFilters *filters);
 void vp_item_toggle_favorite(VpItem *item);
+void vp_item_toggle_hidden(VpItem *item);
 void vp_item_mark_played(VpItem *item, unsigned long timestamp);
 
 void vp_download_queue_init(VpDownloadQueue *queue);
