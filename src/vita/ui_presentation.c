@@ -40,7 +40,8 @@ const VpUiPlatform *vp_ui_platform(const char *slug) {
         {"neogeo", {"platform_neogeo", 0xe7b883}}, {"pce", {"platform_pce", 0xe9b499}},
         {"pc-engine", {"platform_pce", 0xe9b499}}, {"turbografx-16", {"platform_pce", 0xe9b499}},
         {"atari2600", {"platform_atari2600", 0xdea571}}, {"wonderswan", {"platform_wonderswan", 0x9dcbd8}},
-        {"homebrew", {"platform_homebrew", 0x9cdab3}}
+        {"homebrew", {"platform_homebrew", 0x9cdab3}},
+        {VP_FAVORITES_PLATFORM, {"ui_star", 0xffd166}}
     };
     static const VpUiPlatform fallback = {"platform_generic", 0x96d8cb};
     size_t i;
@@ -56,7 +57,8 @@ const char *vp_ui_platform_label(const char *slug) {
         {"platform_gameboy","GB"},{"platform_gameboycolor","GBC"},{"platform_gba","GBA"},
         {"platform_nds","DS"},{"platform_n3ds","3DS"},{"platform_gamecube","GC"},{"platform_wii","Wii"},
         {"platform_dreamcast","DC"},{"platform_genesis","MD"},{"platform_mastersystem","MS"},
-        {"platform_gamegear","GG"},{"platform_neogeo","Neo Geo"},{"platform_pce","PCE"}
+        {"platform_gamegear","GG"},{"platform_neogeo","Neo Geo"},{"platform_pce","PCE"},
+        {"ui_star","Fav"}
     };
     const char *asset=vp_ui_platform(slug)->asset;
     size_t i;
@@ -78,7 +80,7 @@ void vp_ui_console_motion_update(VpUiConsoleMotion *m, size_t selected, size_t t
                                  unsigned long long now, int duration_ms) {
     size_t i;
     float progress, target;
-    if (!total || total>VP_MAX_PLATFORMS || selected>=total) {
+    if (!total || total>VP_MAX_LIBRARY_GROUPS || selected>=total) {
         memset(m,0,sizeof(*m));
         return;
     }
@@ -260,6 +262,27 @@ VpUiRect vp_ui_settings_content_card(void) {
 
 static bool inside(VpUiRect r, int x, int y) {
     return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h;
+}
+
+VpUiRect vp_ui_library_panel(float progress) {
+    VpUiRect r = {960, 20, 440, 464};
+    if (progress < 0.f) progress = 0.f;
+    if (progress > 1.f) progress = 1.f;
+    r.x = (int)lroundf(960.f - 464.f * progress);
+    return r;
+}
+
+VpUiRect vp_ui_library_panel_row(size_t slot, float progress) {
+    VpUiRect panel = vp_ui_library_panel(progress);
+    VpUiRect r = {panel.x + 24, panel.y + 100 + (int)slot * 64, panel.w - 48, 52};
+    return r;
+}
+
+int vp_ui_touch_library_panel_row(float progress, int x, int y) {
+    int slot;
+    for (slot = 0; slot < VP_LIBRARY_ACTIONS_ROWS; ++slot)
+        if (inside(vp_ui_library_panel_row((size_t)slot, progress), x, y)) return slot;
+    return -1;
 }
 
 int vp_ui_console_motion_touch(const VpUiConsoleMotion *m, int x, int y) {

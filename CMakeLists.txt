@@ -10,7 +10,7 @@ project(vitashelflauncher C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-add_library(vitashelflauncher_core src/core/vitashelflauncher.c src/core/vita_titles.c src/core/integrations.c)
+add_library(vitashelflauncher_core src/core/vitashelflauncher.c src/core/vita_titles.c src/core/integrations.c src/core/library_preferences.c)
 target_include_directories(vitashelflauncher_core PUBLIC include)
 target_compile_options(vitashelflauncher_core PRIVATE -Wall -Wextra -Werror)
 

@@ -39,7 +39,7 @@ class VitaTouchNavigationTests(unittest.TestCase):
 
     def test_gestures_route_by_view_and_settle_at_dragged_distance(self):
         state_start = MAIN.index("typedef enum { VP_TOUCH_AXIS_NONE")
-        state_end = MAIN.index("\ntypedef enum {", state_start)
+        state_end = MAIN.index("\nstatic VpLibraryModal library_modal", state_start)
         handlers = MAIN[MAIN.index("static int touch_coordinate_x("):MAIN.index("static void handle_app_events(")]
         prefix = r'''
 #include "ui_presentation.h"

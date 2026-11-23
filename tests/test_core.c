@@ -179,6 +179,7 @@ static VpItem make_item(const char *id, const char *title) {
 static void test_shell_catalog(void) {
     VpApp app;
     VpItem *item;
+    VpPlatformGroup groups[4];
     size_t indexes[4];
 
     vp_app_init(&app);
@@ -213,6 +214,9 @@ static void test_shell_catalog(void) {
     assert(indexes[0] == 0);
     vp_item_toggle_favorite(item);
     assert(item->favorite);
+    assert(vp_catalog_library_platforms(&app.catalog, NULL, groups, 4) == 3);
+    assert(strcmp(groups[0].platform, VP_FAVORITES_PLATFORM) == 0);
+    assert(groups[0].count == 1);
     vp_item_mark_played(item, 100);
     vp_item_mark_played(&app.catalog.items[1], 200);
     assert(vp_catalog_recent(&app.catalog, indexes, 4) == 2);
@@ -222,7 +226,7 @@ static void test_shell_catalog(void) {
     vp_app_select(&app, 1);
     assert(app.selected_platform == 1);
     vp_app_select(&app, 1);
-    assert(app.selected_platform == 0);
+    assert(app.selected_platform == 2);
     assert(strcmp(vp_screen_name(VP_SCREEN_STORES), "Tiendas") == 0);
 }
 
@@ -290,9 +294,9 @@ static void test_library_navigation(void) {
     vp_app_move(&app, 0, -1, 4);
     assert(app.selected_platform == 0);
     vp_app_move(&app, -1, 0, 4);
-    assert(app.selected_platform == 1);
+    assert(app.selected_platform == 2);
 
-    app.selected_platform = 0;
+    app.selected_platform = 1;
     vp_app_open(&app);
     assert(app.library_level == VP_LEVEL_ROMS);
     assert(strcmp(app.active_platform, "nds") == 0);
@@ -318,6 +322,106 @@ static void test_library_navigation(void) {
 
     vp_app_back(&app);
     assert(app.library_level == VP_LEVEL_PLATFORMS);
+}
+
+static void test_library_filters(void) {
+    VpApp app;
+    VpCatalog full;
+    VpPlatformGroup groups[VP_MAX_LIBRARY_GROUPS];
+    size_t visible[VP_MAX_ITEMS];
+    size_t index;
+    VpItem item;
+    VpItem *hidden_favorite;
+
+    vp_app_init(&app);
+    item = make_item("romm:zelda", "Zelda");
+    (void)snprintf(item.platform, sizeof(item.platform), "snes");
+    (void)snprintf(item.platform_display, sizeof(item.platform_display), "Super Nintendo");
+    item.installed = true;
+    item.favorite = true;
+    assert(vp_catalog_add(&app.catalog, &item) != NULL);
+
+    item = make_item("romm:secret", "Hidden Secret");
+    (void)snprintf(item.platform, sizeof(item.platform), "gba");
+    (void)snprintf(item.platform_display, sizeof(item.platform_display), "Game Boy Advance");
+    item.installed = true;
+    item.favorite = true;
+    item.hidden = true;
+    assert(vp_catalog_add(&app.catalog, &item) != NULL);
+
+    item = make_item("romm:patapon", "Patapon");
+    (void)snprintf(item.platform, sizeof(item.platform), "psp");
+    (void)snprintf(item.platform_display, sizeof(item.platform_display), "PlayStation Portable");
+    assert(vp_catalog_add(&app.catalog, &item) != NULL);
+
+    item = make_item("romm:download", "Hidden Download");
+    (void)snprintf(item.platform, sizeof(item.platform), "nds");
+    (void)snprintf(item.platform_display, sizeof(item.platform_display), "Nintendo DS");
+    item.installed = true;
+    item.hidden = true;
+    assert(vp_catalog_add(&app.catalog, &item) != NULL);
+
+    assert(vp_catalog_library_platforms(&app.catalog, NULL, groups, VP_MAX_LIBRARY_GROUPS) == 3);
+    assert(strcmp(groups[0].platform, VP_FAVORITES_PLATFORM) == 0);
+    assert(groups[0].count == 1);
+    assert(strcmp(groups[1].platform, "psp") == 0);
+    assert(strcmp(groups[2].platform, "snes") == 0);
+    assert(vp_catalog_library_items(&app.catalog, VP_FAVORITES_PLATFORM, NULL,
+                                    visible, VP_MAX_ITEMS) == 1);
+    assert(strcmp(app.catalog.items[visible[0]].title, "Zelda") == 0);
+
+    app.library_filters.show_hidden = true;
+    assert(vp_catalog_library_platforms(&app.catalog, &app.library_filters,
+                                        groups, VP_MAX_LIBRARY_GROUPS) == 5);
+    assert(groups[0].count == 2);
+    assert(strcmp(groups[1].platform, "gba") == 0);
+    assert(strcmp(groups[2].platform, "nds") == 0);
+    assert(vp_catalog_library_items(&app.catalog, VP_FAVORITES_PLATFORM,
+                                    &app.library_filters, visible, VP_MAX_ITEMS) == 2);
+    assert(strcmp(app.catalog.items[visible[0]].title, "Hidden Secret") == 0);
+    assert(strcmp(app.catalog.items[visible[1]].title, "Zelda") == 0);
+
+    app.library_filters.downloaded_only = true;
+    app.library_filters.show_hidden = false;
+    assert(vp_catalog_library_platforms(&app.catalog, &app.library_filters,
+                                        groups, VP_MAX_LIBRARY_GROUPS) == 2);
+    assert(groups[0].count == 1);
+    assert(strcmp(groups[1].platform, "snes") == 0);
+
+    app.library_filters.downloaded_only = false;
+    app.library_filters.show_hidden = true;
+    app.selected_platform = 0;
+    vp_app_open(&app);
+    assert(app.library_level == VP_LEVEL_ROMS);
+    assert(strcmp(app.active_platform, VP_FAVORITES_PLATFORM) == 0);
+    assert(vp_app_visible(&app, visible, VP_MAX_ITEMS) == 2);
+    assert(app.selected_item == visible[1]);
+    vp_app_select(&app, 1);
+    assert(app.selected_item == visible[0]);
+    app.library_filters.show_hidden = false;
+    assert(vp_app_visible(&app, visible, VP_MAX_ITEMS) == 1);
+    assert(strcmp(app.catalog.items[app.selected_item].title, "Zelda") == 0);
+
+    hidden_favorite = vp_catalog_find(&app.catalog, "romm:secret");
+    assert(hidden_favorite != NULL && hidden_favorite->hidden);
+    vp_item_toggle_hidden(hidden_favorite);
+    assert(!hidden_favorite->hidden);
+    assert(vp_catalog_library_platforms(&app.catalog, NULL, groups, VP_MAX_LIBRARY_GROUPS) == 4);
+    assert(groups[0].count == 2);
+
+    vp_catalog_init(&full);
+    for (index = 0; index < VP_MAX_PLATFORMS; index++) {
+        char platform[16];
+        (void)snprintf(platform, sizeof(platform), "p%03u", (unsigned)index);
+        item = make_item("romm:slot", platform);
+        (void)snprintf(item.id, sizeof(item.id), "romm:slot%u", (unsigned)index);
+        (void)snprintf(item.platform, sizeof(item.platform), "%s", platform);
+        assert(vp_catalog_add(&full, &item) != NULL);
+    }
+    assert(vp_catalog_library_platforms(&full, NULL, groups, VP_MAX_LIBRARY_GROUPS) ==
+           VP_MAX_LIBRARY_GROUPS);
+    assert(strcmp(groups[0].platform, VP_FAVORITES_PLATFORM) == 0);
+    assert(groups[VP_MAX_LIBRARY_GROUPS - 1].count == 1);
 }
 
 static void test_romm_metadata(void) {
@@ -822,6 +926,7 @@ int main(void) {
     test_shell_catalog();
     test_platform_grouping();
     test_library_navigation();
+    test_library_filters();
     test_romm_metadata();
     test_download_paths();
     test_launch_profiles();

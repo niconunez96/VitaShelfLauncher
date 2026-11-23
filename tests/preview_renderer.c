@@ -23,6 +23,13 @@ static bool missing;
 static const char *unavailable_asset;
 static char last_text[768];
 static char frame_text[16384];
+static bool checking_panel;
+static vita2d_texture *button_atlas;
+static struct { int kind; float x,y; } button_draws[32];
+static size_t button_draw_count;
+static vita2d_texture *star_texture;
+static bool checking_favorites;
+static size_t favorite_heading_draws,favorite_card_draws;
 static _Alignas(16) unsigned char pool[1024*1024];
 static size_t pool_used;
 static int clip_x,clip_y,clip_w,clip_h;
@@ -83,6 +90,22 @@ static void sync_texture(const vita2d_texture *t) {
 }
 void vita2d_draw_texture_tint_part_scale(const vita2d_texture *t,float x,float y,float tx,float ty,float w,float h,float sx,float sy,unsigned int tint) {
     assert(t&&t->surface&&sx>0&&sy>0);
+    if (checking_favorites && t==star_texture) {
+        if (y<148) {
+            assert(w*sx<=32 && h*sy<=32);
+            favorite_heading_draws++;
+        } else {
+            assert(w*sx<=56 && h*sy<=56);
+            favorite_card_draws++;
+        }
+        assert((tint>>24)<=220);
+    }
+    if (t==button_atlas && w==64 && h==64) {
+        assert(button_draw_count<32);
+        button_draws[button_draw_count].kind=(int)(tx/64)+(int)(ty/64)*2;
+        button_draws[button_draw_count].x=x+w*sx/2;
+        button_draws[button_draw_count++].y=y+h*sy/2;
+    }
     sync_texture(t);
     cairo_save(cr); cairo_rectangle(cr,x,y,w*sx,h*sy); cairo_clip(cr);
     cairo_translate(cr,x,y); cairo_scale(cr,sx,sy);
@@ -101,6 +124,8 @@ vita2d_texture *vita2d_load_PNG_file(const char *path) {
     t->surface=cairo_image_surface_create_from_png(local(path));
     if (cairo_surface_status(t->surface)!=CAIRO_STATUS_SUCCESS) { cairo_surface_destroy(t->surface); free(t); return NULL; }
     t->w=cairo_image_surface_get_width(t->surface); t->h=cairo_image_surface_get_height(t->surface);
+    if (strstr(path,"ui_buttons.png")) button_atlas=t;
+    if (strstr(path,"ui_star.png")) star_texture=t;
     textures++; return t;
 }
 vita2d_texture *vita2d_create_empty_texture(unsigned int w,unsigned int h) {
@@ -136,9 +161,16 @@ int vita2d_font_text_width(vita2d_font *font,unsigned int size,const char *s) {
 }
 int vita2d_font_draw_text(vita2d_font *font,int x,int y,unsigned int color,unsigned int size,const char *s) {
     int width=vita2d_font_text_width(font,size,s);
-    assert(size>=16 && size<=30);
+    assert((size>=16 && size<=30) || (size==10 && !strcmp(s,"SELECT")));
     if (!(x>=0 && y>=0 && x+width<=960 && y<=544)) {
         fprintf(stderr,"Text overflow x=%d y=%d width=%d: %s\n",x,y,width,s); abort();
+    }
+    if (checking_panel && (!strcmp(s,"Acciones del juego") || !strcmp(s,"Filtros de biblioteca"))) {
+        VpUiRect panel=vp_ui_library_panel(1.f);
+        cairo_text_extents_t extents;
+        cairo_text_extents(cr,s,&extents);
+        assert(x>=panel.x+24 && y+extents.y_bearing>=panel.y+24);
+        assert(y+extents.y_bearing+extents.height<vp_ui_library_panel_row(0,1.f).y-16);
     }
     source(color); cairo_move_to(cr,x,y); cairo_show_text(cr,s);
     assert(cairo_status(cr)==CAIRO_STATUS_SUCCESS);
@@ -152,7 +184,9 @@ static void settle(VpUiFrame *frame) {
     size_t i;
     for (i=0;i<45;i++) {
         struct timespec pause={0,2000000};
-        pool_used=0; frame_text[0]='\0'; vp_ui_prepare(frame); clear_canvas(); vp_ui_render(frame); nanosleep(&pause,NULL);
+        pool_used=0; frame_text[0]='\0'; button_draw_count=0;
+        favorite_heading_draws=favorite_card_draws=0;
+        vp_ui_prepare(frame); clear_canvas(); vp_ui_render(frame); nanosleep(&pause,NULL);
     }
 }
 
@@ -259,6 +293,118 @@ static void check_carousel_motion(VpUiFrame *frame,VpApp *app,cairo_surface_t *c
     free(snapshot);
     app->selected_item=saved_item; app->library_level=saved_level; app->active_view=saved_view;
     frame->preferences.animated=saved_animated;
+}
+
+static void check_favorites_icon(VpUiFrame *frame,VpApp *app,cairo_surface_t *canvas,const char *directory) {
+    VpPlatformGroup favorite={0};
+    const VpPlatformGroup *saved_groups=frame->groups;
+    size_t saved_count=frame->group_count;
+    (void)snprintf(favorite.platform,sizeof(favorite.platform),"%s",VP_FAVORITES_PLATFORM);
+    (void)snprintf(favorite.display,sizeof(favorite.display),"%s",VP_FAVORITES_DISPLAY);
+    favorite.count=1;
+    frame->groups=&favorite; frame->group_count=1;
+    app->active_screen=VP_SCREEN_LIBRARY; app->library_level=VP_LEVEL_PLATFORMS;
+    app->selected_platform=0;
+    checking_favorites=true; settle(frame); checking_favorites=false;
+    assert(favorite_heading_draws==1 && favorite_card_draws==1);
+    if (directory) {
+        char path[1024];
+        (void)snprintf(path,sizeof(path),"%s/favorites-subtle.png",directory);
+        assert(!cairo_surface_write_to_png(canvas,path));
+    }
+    frame->groups=saved_groups; frame->group_count=saved_count;
+}
+
+static void check_library_controls(VpUiFrame *frame,VpApp *app,cairo_surface_t *canvas,const char *directory) {
+    app->active_screen=VP_SCREEN_LIBRARY; app->library_level=VP_LEVEL_PLATFORMS;
+    frame->library_modal=VP_LIBRARY_MODAL_NONE;
+    settle(frame);
+    assert(strstr(frame_text,"SELECT\nFiltros\n"));
+    assert(!strstr(frame_text,"Vista\n") && !strstr(frame_text,"Opciones\n"));
+    frame->library_modal=VP_LIBRARY_MODAL_FILTERS; frame->library_modal_progress=1.f;
+    checking_panel=true; settle(frame); checking_panel=false;
+    assert(strstr(frame_text,"Filtros de biblioteca\n") && strstr(frame_text,"Mostrar juegos ocultos\n"));
+    frame->library_modal=VP_LIBRARY_MODAL_NONE;
+    app->library_level=VP_LEVEL_ROMS;
+    app->active_view=VP_VIEW_GRID; app->selected_item=0;
+    frame->library_modal=VP_LIBRARY_MODAL_NONE;
+    settle(frame);
+    assert(strstr(frame_text,"SELECT\nFiltros\n"));
+    assert(strstr(frame_text,"Vista\n")<strstr(frame_text,"Opciones\n"));
+    assert(strstr(frame_text,"Opciones\n")<strstr(frame_text,"SELECT\n"));
+    for (int modal=VP_LIBRARY_MODAL_ACTIONS;modal<=VP_LIBRARY_MODAL_FILTERS;modal++) {
+        VpUiRect panel=vp_ui_library_panel(1.f);
+        frame->library_modal=(VpLibraryModal)modal; frame->library_modal_progress=1.f;
+        checking_panel=true; settle(frame); checking_panel=false;
+        assert(strstr(frame_text,"Elegir\n") && strstr(frame_text,"Activar\n") && strstr(frame_text,"Cerrar\n"));
+        assert(!strstr(frame_text,"Arriba / Abajo"));
+        bool cross=false,circle=false;
+        for (size_t i=0;i<button_draw_count;i++) {
+            if (button_draws[i].y>=panel.y+panel.h-60 && button_draws[i].y<panel.y+panel.h-12) {
+                if (button_draws[i].kind==0) cross=true;
+                if (button_draws[i].kind==1) circle=true;
+            }
+        }
+        assert(cross && circle);
+        if (directory) {
+            char path[1024];
+            (void)snprintf(path,sizeof(path),"%s/library-%s.png",directory,modal==VP_LIBRARY_MODAL_ACTIONS?"actions":"filters");
+            assert(!cairo_surface_write_to_png(canvas,path));
+        }
+    }
+    frame->library_modal=VP_LIBRARY_MODAL_NONE;
+}
+
+static void check_hidden_cards(VpUiFrame *frame,VpApp *app,cairo_surface_t *canvas,const char *directory) {
+    const VpView views[]={VP_VIEW_GRID,VP_VIEW_LIST,VP_VIEW_CAROUSEL};
+    const char *names[]={"grid","list","carousel"};
+    int stride=cairo_image_surface_get_stride(canvas);
+    size_t bytes=(size_t)stride*544;
+    unsigned char *snapshot=malloc(bytes);
+    assert(snapshot);
+    app->active_screen=VP_SCREEN_LIBRARY; app->library_level=VP_LEVEL_ROMS;
+    app->selected_item=0;
+    frame->preferences.animated=false; frame->grid_scroll=frame->list_scroll=0;
+    frame->touch_scrolling=false;
+    vp_ui_load_theme("ui_motion_ms=0\nui_wallpaper_alpha=0\n");
+    for (size_t view=0;view<3;view++) {
+        VpUiRect card;
+        app->active_view=views[view];
+        if (views[view]==VP_VIEW_GRID) card=vp_ui_scrolled_grid_tile(0,0);
+        else if (views[view]==VP_VIEW_LIST) card=(VpUiRect){382,160,212,262};
+        else {
+            VpUiCarouselMotion motion={0};
+            vp_ui_carousel_motion_update(&motion,0,frame->visible_count,0,0);
+            card=vp_ui_carousel_motion_tile(&motion,0);
+        }
+        app->catalog.items[0].hidden=false;
+        settle(frame); cairo_surface_flush(canvas);
+        memcpy(snapshot,cairo_image_surface_get_data(canvas),bytes);
+        app->catalog.items[0].hidden=true;
+        settle(frame); cairo_surface_flush(canvas);
+        assert(!strstr(frame_text,"Oculto\n"));
+        const unsigned char *current=cairo_image_surface_get_data(canvas);
+        int dimmed=0;
+        /* Away from the focus outline, badges and the centered icon. */
+        for (int y=card.y+card.h/4;y<card.y+card.h*3/4;y++)
+            for (int x=card.x+12;x<card.x+card.w/4;x++)
+                if (brightness(image_pixel(snapshot,stride,x,y))>
+                    brightness(image_pixel(current,stride,x,y))+20) dimmed++;
+        assert(dimmed>100);
+        int cx=card.x+card.w/2,cy=card.y+card.h/2;
+        /* The slash must cross the actual card center, not replace a corner badge. */
+        assert(brightness(image_pixel(current,stride,cx,cy))>400);
+        assert(app->selected_item==0 && app->catalog.items[0].hidden);
+        if (directory) {
+            char path[1024];
+            (void)snprintf(path,sizeof(path),"%s/hidden-%s.png",directory,names[view]);
+            assert(!cairo_surface_write_to_png(canvas,path));
+        }
+        app->catalog.items[0].hidden=false;
+        settle(frame); cairo_surface_flush(canvas);
+        assert(!memcmp(snapshot,cairo_image_surface_get_data(canvas),bytes));
+    }
+    free(snapshot);
 }
 
 static void check_touch_scroll(VpUiFrame *frame,VpApp *app,cairo_surface_t *canvas) {
@@ -383,6 +529,8 @@ int main(int argc,char **argv) {
         vp_ui_text(&typefaces,VP_TYPE_GRID_TITLE,false,0,40,400,0xffffffffu,"A title\nwith an unexpected line break");
         assert(strchr(last_text,'\n')==NULL);
     }
+    check_favorites_icon(&frame,&app,canvas,argc>1?argv[1]:NULL);
+    check_library_controls(&frame,&app,canvas,argc>1?argv[1]:NULL);
     for (c=0;c<sizeof(cases)/sizeof(cases[0]);c++) {
         app.active_screen=VP_SCREEN_LIBRARY; app.library_level=VP_LEVEL_PLATFORMS; app.selected_platform=5; app.selected_item=0;
         frame.group_count=12; frame.visible_count=12; frame.settings_detail=false; frame.settings_integration_open=false; queue.count=6;
@@ -473,6 +621,7 @@ int main(int argc,char **argv) {
         }
         if (argc>1) { char path[1024]; (void)snprintf(path,sizeof(path),"%s/%s.png",argv[1],cases[c]); assert(!cairo_surface_write_to_png(canvas,path)); }
     }
+    check_hidden_cards(&frame,&app,canvas,argc>1?argv[1]:NULL);
     check_carousel_motion(&frame,&app,canvas,argc>1?argv[1]:NULL);
     check_touch_scroll(&frame,&app,canvas);
     check_console_material(&frame,&app,canvas,argc>1?argv[1]:NULL);

@@ -18,6 +18,9 @@ typedef struct {
     vita2d_texture *background;
     const VpDownloadQueue *downloads;
     size_t download_selection;
+    VpLibraryModal library_modal;
+    size_t library_modal_row;
+    float library_modal_progress;
     int settings_section, settings_field;
     bool settings_detail, settings_integration_open;
     int settings_integration;

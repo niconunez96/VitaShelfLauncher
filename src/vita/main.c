@@ -28,6 +28,7 @@
 #include "ui_renderer.h"
 #include "ui_backdrop.h"
 #include "catalog_cache.h"
+#include "library_preferences.h"
 #include "vita_thread_priority.h"
 #include "local_library.h"
 #include "integrations.h"
@@ -45,7 +46,10 @@
 #define VP_CONFIG_PATH "ux0:data/vitashelflauncher/config.ini"
 #define VP_CATALOG_CACHE_PATH "ux0:data/vitashelflauncher/catalog.cache"
 #define VP_CATALOG_CACHE_PARTIAL "ux0:data/vitashelflauncher/catalog.cache.part"
-#define VP_CATALOG_CACHE_VERSION 2U
+#define VP_CATALOG_CACHE_VERSION 3U
+#define VP_LIBRARY_PREFERENCES_PATH "ux0:data/vitashelflauncher/library.ini"
+#define VP_LIBRARY_PREFERENCES_PARTIAL "ux0:data/vitashelflauncher/library.ini.part"
+#define VP_LIBRARY_PREFERENCES_LINE 1024
 #define VP_ARTWORK_CACHE "ux0:data/vitashelflauncher/cache/covers"
 #define VP_TOUCH_WIDTH 1920
 #define VP_TOUCH_HEIGHT 1088
@@ -92,6 +96,15 @@ static size_t list_start;
 static size_t list_selected=VP_MAX_ITEMS;
 static size_t grid_start;
 static size_t grid_selected=VP_MAX_ITEMS;
+static VpLibraryModal library_modal;
+static size_t library_modal_row;
+static unsigned long long library_modal_opened_at;
+static float library_modal_progress(void);
+
+static int library_modal_rows(void) {
+    return library_modal==VP_LIBRARY_MODAL_NONE?0:
+        (library_modal==VP_LIBRARY_MODAL_ACTIONS?VP_LIBRARY_ACTIONS_ROWS:VP_LIBRARY_FILTERS_ROWS);
+}
 
 typedef enum {
     VP_JOB_NONE,
@@ -146,7 +159,7 @@ static VpBackgroundJob background_job = {
 static VpDownloadQueue download_queue;
 /* Three grid rows can be visible during a drag; retain the selected cover too. */
 #define VP_COVER_SLOTS (VP_UI_GRID_WINDOW + 1)
-static VpPlatformGroup platform_groups[VP_MAX_PLATFORMS];
+static VpPlatformGroup platform_groups[VP_MAX_LIBRARY_GROUPS];
 static size_t visible_indexes[VP_MAX_ITEMS];
 static size_t platform_group_count;
 static size_t visible_count_cache;
@@ -218,7 +231,7 @@ static bool load_catalog_cache(VpApp *app, const VpRommConfig *config) {
     valid = fread(cached_url, 1, sizeof(magic), file) == sizeof(magic) &&
             memcmp(cached_url, magic, sizeof(magic)) == 0 &&
             fread(&version, sizeof(version), 1, file) == 1 &&
-            (version == VP_CATALOG_CACHE_VERSION || version == 1U) &&
+            (version == VP_CATALOG_CACHE_VERSION || version == 1U || version == 2U) &&
             fread(cached_url, sizeof(cached_url), 1, file) == 1 &&
             strcmp(cached_url, config->base_url) == 0;
     if (valid) valid=vp_catalog_cache_read(file,version,&cached_catalog);
@@ -358,6 +371,100 @@ static bool save_romm_config(void) {
     return true;
 }
 
+static bool write_library_preference_line(const char *line, void *context) {
+    FILE *file = context;
+    return file != NULL && line != NULL &&
+           fputs(line, file) >= 0 && fputc('\n', file) != EOF;
+}
+
+static bool save_library_preferences(const VpApp *value) {
+    FILE *file;
+    FILE *existing;
+    char line[VP_LIBRARY_PREFERENCES_LINE];
+    bool written;
+    bool had_preferences;
+    if (value == NULL) return false;
+    (void)sceIoMkdir("ux0:data", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
+    file = fopen(VP_LIBRARY_PREFERENCES_PARTIAL, "wb");
+    if (file == NULL) return false;
+    existing = fopen(VP_LIBRARY_PREFERENCES_PATH, "rb");
+    had_preferences = existing != NULL;
+    written = vp_library_preferences_serialize(&value->catalog, &value->library_filters,
+                                               romm_config.base_url,
+                                               write_library_preference_line, file);
+    /* A provider refresh or asynchronous local scan may leave some saved games
+     * temporarily absent. Retain their scoped records instead of forgetting them. */
+    if (existing != NULL) {
+        while (written && fgets(line, sizeof(line), existing) != NULL) {
+            const char *equals = strchr(line, '=');
+            bool present = false;
+            if (strncmp(line, "item.", 5) != 0 || equals == NULL) continue;
+            for (size_t index = 0; index < value->catalog.count; index++) {
+                char key[VP_TEXT * 2 + 48];
+                vp_library_item_key(&value->catalog.items[index], romm_config.base_url,
+                                     key, sizeof(key));
+                if ((size_t)(equals - (line + 5)) == strlen(key) &&
+                    strncmp(line + 5, key, strlen(key)) == 0) {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present && fputs(line, file) < 0) written = false;
+        }
+        if (ferror(existing)) written = false;
+        if (fclose(existing) != 0) written = false;
+    }
+    if (fclose(file) != 0 || !written) {
+        (void)sceIoRemove(VP_LIBRARY_PREFERENCES_PARTIAL);
+        return false;
+    }
+    if (had_preferences) {
+        (void)sceIoRemove(VP_LIBRARY_PREFERENCES_PATH ".bak");
+        if (sceIoRename(VP_LIBRARY_PREFERENCES_PATH, VP_LIBRARY_PREFERENCES_PATH ".bak") < 0) {
+            (void)sceIoRemove(VP_LIBRARY_PREFERENCES_PARTIAL);
+            return false;
+        }
+    }
+    if (sceIoRename(VP_LIBRARY_PREFERENCES_PARTIAL, VP_LIBRARY_PREFERENCES_PATH) < 0) {
+        if (had_preferences)
+            (void)sceIoRename(VP_LIBRARY_PREFERENCES_PATH ".bak", VP_LIBRARY_PREFERENCES_PATH);
+        (void)sceIoRemove(VP_LIBRARY_PREFERENCES_PARTIAL);
+        return false;
+    }
+    if (had_preferences) (void)sceIoRemove(VP_LIBRARY_PREFERENCES_PATH ".bak");
+    return true;
+}
+
+static bool load_library_preferences(VpApp *value) {
+    FILE *file;
+    char line[VP_LIBRARY_PREFERENCES_LINE];
+    bool failed;
+    if (value == NULL) return false;
+    value->library_filters.show_hidden = false;
+    value->library_filters.downloaded_only = false;
+    file = fopen(VP_LIBRARY_PREFERENCES_PATH, "rb");
+    if (file == NULL) {
+        FILE *backup = fopen(VP_LIBRARY_PREFERENCES_PATH ".bak", "rb");
+        if (backup != NULL) {
+            (void)fclose(backup);
+            if (sceIoRename(VP_LIBRARY_PREFERENCES_PATH ".bak", VP_LIBRARY_PREFERENCES_PATH) < 0)
+                return false;
+            file = fopen(VP_LIBRARY_PREFERENCES_PATH, "rb");
+            if (file == NULL) return false;
+        }
+    }
+    if (file == NULL) return save_library_preferences(value);
+    vp_library_preferences_reset(&value->catalog);
+    while (fgets(line, sizeof(line), file) != NULL)
+        (void)vp_library_preferences_parse_line(line, &value->catalog,
+                                                &value->library_filters,
+                                                romm_config.base_url);
+    failed = ferror(file) != 0;
+    if (fclose(file) != 0 || failed) return false;
+    return true;
+}
+
 static bool file_exists(const char *path) {
     FILE *file = fopen(path, "rb");
     if (file == NULL) return false;
@@ -397,6 +504,7 @@ static void refresh_downloaded_items(VpApp *app) {
 static void apply_provider_catalog(VpApp *app, const VpCatalog *catalog) {
     if (app == NULL || catalog == NULL) return;
     catalog_omitted=vp_catalog_replace_providers(&app->catalog,catalog);
+    (void)load_library_preferences(app);
     app->library_level = VP_LEVEL_PLATFORMS;
     app->active_platform[0] = '\0';
     app->selected_platform = 0;
@@ -745,13 +853,18 @@ static void background_job_poll(VpApp *app) {
             for (size_t i=0;i<background_job.catalog.count;i++) {
                 VpItem *fresh=&background_job.catalog.items[i];
                 VpItem *previous=vp_catalog_find(&app->catalog,fresh->id);
-                if (previous) { fresh->favorite=previous->favorite; fresh->last_played=previous->last_played; }
+                if (previous) {
+                    fresh->favorite=previous->favorite;
+                    fresh->hidden=previous->hidden;
+                    fresh->last_played=previous->last_played;
+                }
             }
             if (vp_catalog_source_matches(&app->catalog,&background_job.catalog,VP_SOURCE_LOCAL)) {
                 (void)start_next_download();
                 return;
             }
             size_t omitted=background_job.omitted+vp_catalog_replace_source(&app->catalog,&background_job.catalog,VP_SOURCE_LOCAL);
+            (void)load_library_preferences(app);
             app->library_level=VP_LEVEL_PLATFORMS;
             app->selected_platform=0; app->selected_item=0; app->active_platform[0]=0;
             catalog_view_cache_dirty=true; cover_cache_dirty=true;
@@ -855,6 +968,7 @@ static void background_job_poll(VpApp *app) {
         VpItem *completed = vp_catalog_find(&app->catalog, item.id);
         if (completed != NULL) {
             completed->installed = true;
+            catalog_view_cache_dirty = true;
             (void)snprintf(completed->launch_target, sizeof(completed->launch_target), "%s",
                            destination);
         }
@@ -863,7 +977,10 @@ static void background_job_poll(VpApp *app) {
         (void)start_next_download();
     } else if (kind == VP_JOB_INSTALL_HOMEBREW) {
         VpItem *completed = vp_catalog_find(&app->catalog, item.id);
-        if (completed != NULL) completed->installed = true;
+        if (completed != NULL) {
+            completed->installed = true;
+            catalog_view_cache_dirty = true;
+        }
         show_notification(app, "Instalacion finalizada; revisa LiveArea");
         local_scan_pending=true;
     }
@@ -1239,8 +1356,12 @@ static void refresh_catalog_view_cache(VpApp *app) {
     if (app == NULL) return;
     if (app->library_level == VP_LEVEL_PLATFORMS) {
         if (catalog_view_cache_dirty || cached_library_level != VP_LEVEL_PLATFORMS) {
-            platform_group_count = vp_catalog_platforms(&app->catalog, platform_groups,
-                                                        VP_MAX_PLATFORMS);
+            platform_group_count = vp_catalog_library_platforms(&app->catalog,
+                                                                 &app->library_filters,
+                                                                 platform_groups,
+                                                                 VP_MAX_LIBRARY_GROUPS);
+            if (app->selected_platform >= platform_group_count)
+                app->selected_platform = platform_group_count ? platform_group_count - 1 : 0;
             cached_library_level = VP_LEVEL_PLATFORMS;
             cached_platform[0] = '\0';
             catalog_view_cache_dirty = false;
@@ -1795,6 +1916,8 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
         }
     }
     frame->downloads = &download_queue; frame->download_selection = download_selection;
+    frame->library_modal = library_modal; frame->library_modal_row = library_modal_row;
+    frame->library_modal_progress = library_modal_progress();
     frame->settings_section = settings_section; frame->settings_field = settings_field;
     frame->preferences = ui_preferences;
     frame->settings_detail = settings_detail_active;
@@ -1851,9 +1974,93 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
     vp_ui_prepare(frame);
 }
 
+static void close_library_modal(void) {
+    library_modal = VP_LIBRARY_MODAL_NONE;
+    library_modal_row = 0;
+    library_modal_opened_at = 0;
+}
+
+static void open_library_modal(VpLibraryModal modal) {
+    library_modal = modal;
+    library_modal_row = 0;
+    library_modal_opened_at = sceKernelGetProcessTimeWide();
+}
+
+static float library_modal_progress(void) {
+    unsigned long long elapsed;
+    if (library_modal == VP_LIBRARY_MODAL_NONE || library_modal_opened_at == 0) return 1.f;
+    elapsed = sceKernelGetProcessTimeWide() - library_modal_opened_at;
+    return vp_ui_ease(fminf(1.f, (float)elapsed / 220000.f));
+}
+
+static void persist_library_preferences(void) {
+    if (!save_library_preferences(&app))
+        show_notification(&app, "No se pudo guardar la biblioteca");
+}
+
+static void handle_library_modal_input(unsigned int pressed) {
+    int rows = library_modal_rows();
+    if (rows <= 0) return;
+    if (pressed & SCE_CTRL_UP) {
+        library_modal_row = (library_modal_row + (size_t)rows - 1) % (size_t)rows;
+        vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+    }
+    if (pressed & SCE_CTRL_DOWN) {
+        library_modal_row = (library_modal_row + 1) % (size_t)rows;
+        vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+    }
+    if ((pressed & SCE_CTRL_CIRCLE) ||
+        (library_modal == VP_LIBRARY_MODAL_ACTIONS && (pressed & SCE_CTRL_SQUARE)) ||
+        (library_modal == VP_LIBRARY_MODAL_FILTERS && (pressed & SCE_CTRL_SELECT))) {
+        close_library_modal();
+        vp_ui_audio_play(VP_UI_SOUND_BACK);
+        return;
+    }
+    if (!(pressed & SCE_CTRL_CROSS)) return;
+    if (library_modal == VP_LIBRARY_MODAL_ACTIONS) {
+        refresh_catalog_view_cache(&app);
+        VpItem *item = app.selected_item < app.catalog.count ?
+                        &app.catalog.items[app.selected_item] : NULL;
+        if (visible_count_cache == 0 || item == NULL) {
+            close_library_modal();
+            return;
+        }
+        if (library_modal_row == 0) vp_item_toggle_favorite(item);
+        else if (library_modal_row == 1) vp_item_toggle_hidden(item);
+        persist_library_preferences();
+        catalog_view_cache_dirty = true;
+        refresh_catalog_view_cache(&app);
+    } else {
+        if (library_modal_row == 0) app.library_filters.show_hidden = !app.library_filters.show_hidden;
+        else if (library_modal_row == 1) app.library_filters.downloaded_only = !app.library_filters.downloaded_only;
+        persist_library_preferences();
+        catalog_view_cache_dirty = true;
+        refresh_catalog_view_cache(&app);
+    }
+    close_library_modal();
+    vp_ui_audio_play(VP_UI_SOUND_ENTER);
+}
+
 static unsigned int touch_navigation_pressed(int x, int y) {
     int slot;
-    int screen = vp_ui_touch_dock_screen(x, y);
+    int screen;
+    if (library_modal != VP_LIBRARY_MODAL_NONE) {
+        float progress = library_modal_progress();
+        VpUiRect panel = vp_ui_library_panel(progress);
+        int hint_y = panel.y + panel.h - 38;
+        slot = vp_ui_touch_library_panel_row(progress, x, y);
+        if (slot >= 0) {
+            library_modal_row = (size_t)slot;
+            return SCE_CTRL_CROSS;
+        }
+        if (y>=hint_y-18 && y<hint_y+18) {
+            if (x>=panel.x+146 && x<panel.x+274) return SCE_CTRL_CROSS;
+            if (x>=panel.x+286 && x<panel.x+416) return SCE_CTRL_CIRCLE;
+        }
+        if (vp_ui_touch_back(x, y)) return SCE_CTRL_CIRCLE;
+        return 0;
+    }
+    screen = vp_ui_touch_dock_screen(x, y);
     if (screen >= 0) {
         if (settings_ime_active) return 0;
         if (app.active_screen != (VpScreen)screen) {
@@ -1864,9 +2071,10 @@ static unsigned int touch_navigation_pressed(int x, int y) {
     }
     if (app.active_screen == VP_SCREEN_LIBRARY) {
         refresh_catalog_view_cache(&app);
-        if (y>=492 && y<534 && x>=350 && x<595) return SCE_CTRL_CROSS;
         if (app.library_level == VP_LEVEL_PLATFORMS) {
             size_t target;
+            if (y>=492 && y<534 && x>=350 && x<595) return SCE_CTRL_CROSS;
+            if (y>=492 && y<534 && x>=745 && x<880) return SCE_CTRL_SELECT;
             slot = vp_ui_touch_platform(x, y);
             if (slot < 0) return 0;
             target = (size_t)slot;
@@ -1878,9 +2086,10 @@ static unsigned int touch_navigation_pressed(int x, int y) {
             }
             return SCE_CTRL_CROSS;
         }
-        if (vp_ui_touch_back(x, y)) return SCE_CTRL_CIRCLE;
-        if (vp_ui_touch_view_toggle(x, y)) return SCE_CTRL_TRIANGLE;
-        if (y>=492 && y<534 && x>=700 && x<804) return SCE_CTRL_SQUARE;
+        if (y>=492 && y<534 && x>=340 && x<470) return SCE_CTRL_TRIANGLE;
+        if (y>=492 && y<534 && x>=480 && x<640) return SCE_CTRL_SQUARE;
+        if (y>=492 && y<534 && x>=645 && x<775) return SCE_CTRL_SELECT;
+        if (y>=492 && y<534 && x>=780 && x<875) return SCE_CTRL_CIRCLE;
         if (app.active_view == VP_VIEW_CAROUSEL) {
             int offset=vp_ui_touch_carousel_offset(x,y);
             if (offset<0) return SCE_CTRL_LEFT;
@@ -2137,6 +2346,7 @@ int main(void) {
         VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
     request_romm_check();
     (void)load_catalog_cache(&app, &romm_config);
+    (void)load_library_preferences(&app);
     refresh_downloaded_items(&app);
     vita2d_init();
     if (!vp_ui_fonts_load(font)) { vita2d_fini(); return 1; }
@@ -2189,7 +2399,9 @@ int main(void) {
             app.installation_armed = false;
             installation_armed_at = 0;
         }
-        if (app.active_screen == VP_SCREEN_SETTINGS) {
+        if (library_modal != VP_LIBRARY_MODAL_NONE) {
+            handle_library_modal_input(pressed);
+        } else if (app.active_screen == VP_SCREEN_SETTINGS) {
             handle_settings_input(&app, pressed);
             if (!settings_ime_active && !settings_detail_active && (pressed & SCE_CTRL_LTRIGGER)) {
                 vp_app_cycle_screen(&app, -1);
@@ -2240,6 +2452,8 @@ int main(void) {
                     if (selected_platform != app.selected_platform || selected_item != app.selected_item)
                         vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
                 }
+                if (app.library_level != VP_LEVEL_ROMS)
+                    pressed &= ~SCE_CTRL_TRIANGLE;
                 if (pressed & SCE_CTRL_TRIANGLE) {
                     VpView previous = app.active_view;
                     vp_app_cycle_view(&app);
@@ -2248,9 +2462,17 @@ int main(void) {
                         show_notification(&app, "No se pudo guardar la vista");
                     }
                 }
+                if (pressed & SCE_CTRL_SELECT) {
+                    open_library_modal(VP_LIBRARY_MODAL_FILTERS);
+                    pressed = 0;
+                    vp_ui_audio_play(VP_UI_SOUND_ENTER);
+                }
                 if ((pressed & SCE_CTRL_SQUARE) && app.library_level == VP_LEVEL_ROMS &&
-                    app.selected_item < app.catalog.count)
-                    vp_item_toggle_favorite(&app.catalog.items[app.selected_item]);
+                    visible_count_cache > 0 && app.selected_item < app.catalog.count) {
+                    open_library_modal(VP_LIBRARY_MODAL_ACTIONS);
+                    pressed = 0;
+                    vp_ui_audio_play(VP_UI_SOUND_ENTER);
+                }
                 if (pressed & SCE_CTRL_CIRCLE) {
                     vp_app_back(&app);
                     vp_ui_audio_play(VP_UI_SOUND_BACK);

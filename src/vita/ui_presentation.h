@@ -12,6 +12,13 @@ typedef struct { int wallpaper; int text_color; bool animated; } VpUiPreferences
 typedef struct { const char *id, *label, *thumbnail; } VpUiWallpaper;
 typedef struct { const char *id, *label; } VpUiTextColor;
 typedef struct { float x, y, scale; } VpUiBackdropTransform;
+typedef enum {
+    VP_LIBRARY_MODAL_NONE,
+    VP_LIBRARY_MODAL_ACTIONS,
+    VP_LIBRARY_MODAL_FILTERS
+} VpLibraryModal;
+#define VP_LIBRARY_ACTIONS_ROWS 3
+#define VP_LIBRARY_FILTERS_ROWS 3
 #define VP_UI_WALLPAPER_COUNT 4
 #define VP_UI_TEXT_COLOR_COUNT 4
 #define VP_UI_APPEARANCE_TEXT_COLOR_SLOT VP_UI_WALLPAPER_COUNT
@@ -47,7 +54,7 @@ typedef struct {
     size_t selected, count;
     unsigned long long changed_at;
     float scroll, from_scroll;
-    float lift[VP_MAX_PLATFORMS], from_lift[VP_MAX_PLATFORMS];
+    float lift[VP_MAX_LIBRARY_GROUPS], from_lift[VP_MAX_LIBRARY_GROUPS];
 } VpUiConsoleMotion;
 typedef struct {
     size_t selected, count;
@@ -81,6 +88,9 @@ VpUiRect vp_ui_list_row(size_t slot);
 VpUiRect vp_ui_carousel_tile(int offset);
 VpUiRect vp_ui_settings_row(size_t slot);
 VpUiRect vp_ui_settings_content_card(void);
+VpUiRect vp_ui_library_panel(float progress);
+VpUiRect vp_ui_library_panel_row(size_t slot, float progress);
+int vp_ui_touch_library_panel_row(float progress, int x, int y);
 VpUiRect vp_ui_wallpaper_tile(size_t slot);
 VpUiRect vp_ui_wallpaper_motion_row(void);
 VpUiRect vp_ui_text_color_row(void);

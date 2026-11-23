@@ -12,7 +12,7 @@ static char vp_fetch_response[VP_FETCH_RESPONSE_SIZE];
 /* The Vita frontend is single-threaded; keeping these scratch buffers off its small stack
  * avoids a startup crash while grouping a large catalog. */
 static size_t vp_visible_scratch[VP_MAX_ITEMS];
-static VpPlatformGroup vp_platform_scratch[VP_MAX_PLATFORMS];
+static VpPlatformGroup vp_platform_scratch[VP_MAX_LIBRARY_GROUPS];
 
 static int vp_compare_ci(const char *a, const char *b) {
     while (*a != '\0' && *b != '\0') {
@@ -302,24 +302,10 @@ static int vp_compare_item(const VpItem *a, const VpItem *b) {
     return strcmp(a->id, b->id);
 }
 
-static size_t vp_platform_count(const VpCatalog *catalog) {
-    size_t count = 0;
-    size_t index;
-    if (catalog == NULL) return 0;
-    for (index = 0; index < catalog->count; index++) {
-        const char *platform = catalog->items[index].platform;
-        size_t previous;
-        bool seen = false;
-        if (platform[0] == '\0') continue;
-        for (previous = 0; previous < index; previous++) {
-            if (strcmp(catalog->items[previous].platform, platform) == 0) {
-                seen = true;
-                break;
-            }
-        }
-        if (!seen) count++;
-    }
-    return count;
+static size_t vp_app_platform_count(const VpApp *app) {
+    if (app == NULL) return 0;
+    return vp_catalog_library_platforms(&app->catalog, &app->library_filters,
+                                        vp_platform_scratch, VP_MAX_LIBRARY_GROUPS);
 }
 
 size_t vp_catalog_platforms(const VpCatalog *catalog, VpPlatformGroup *groups, size_t capacity) {
@@ -363,6 +349,66 @@ size_t vp_catalog_platforms(const VpCatalog *catalog, VpPlatformGroup *groups, s
     return found;
 }
 
+bool vp_library_item_visible(const VpItem *item, const VpLibraryFilters *filters) {
+    if (item == NULL) return false;
+    if (filters == NULL) return !item->hidden;
+    if (item->hidden && !filters->show_hidden) return false;
+    if (filters->downloaded_only && !item->installed) return false;
+    return true;
+}
+
+size_t vp_catalog_library_platforms(const VpCatalog *catalog, const VpLibraryFilters *filters,
+                                    VpPlatformGroup *groups, size_t capacity) {
+    size_t index;
+    size_t found;
+    size_t favorites = 0;
+    if (catalog == NULL || groups == NULL || capacity == 0) return 0;
+    memset(&groups[0], 0, sizeof(groups[0]));
+    vp_copy(groups[0].platform, sizeof(groups[0].platform), VP_FAVORITES_PLATFORM);
+    vp_copy(groups[0].display, sizeof(groups[0].display), VP_FAVORITES_DISPLAY);
+    for (index = 0; index < catalog->count; index++) {
+        if (vp_library_item_visible(&catalog->items[index], filters) &&
+            catalog->items[index].favorite) favorites++;
+    }
+    groups[0].count = favorites;
+    found = 1;
+    for (index = 0; index < catalog->count; index++) {
+        const VpItem *item = &catalog->items[index];
+        size_t cursor;
+        size_t insertion;
+        if (!vp_library_item_visible(item, filters) || item->platform[0] == '\0') continue;
+        for (cursor = 1; cursor < found; cursor++) {
+            if (strcmp(groups[cursor].platform, item->platform) == 0) break;
+        }
+        if (cursor < found) {
+            groups[cursor].count++;
+            if (groups[cursor].display[0] == '\0' ||
+                strcmp(groups[cursor].display, groups[cursor].platform) == 0) {
+                if (item->platform_display[0] != '\0')
+                    vp_copy(groups[cursor].display, sizeof(groups[cursor].display),
+                            item->platform_display);
+            }
+            continue;
+        }
+        if (found >= capacity) continue;
+        memset(&groups[found], 0, sizeof(groups[found]));
+        vp_copy(groups[found].platform, sizeof(groups[found].platform), item->platform);
+        vp_copy(groups[found].display, sizeof(groups[found].display),
+                item->platform_display[0] != '\0' ? item->platform_display : item->platform);
+        groups[found].count = 1;
+        insertion = found;
+        while (insertion > 1 &&
+               vp_compare_ci(groups[insertion - 1].display, groups[insertion].display) > 0) {
+            VpPlatformGroup temp = groups[insertion - 1];
+            groups[insertion - 1] = groups[insertion];
+            groups[insertion] = temp;
+            insertion--;
+        }
+        found++;
+    }
+    return found;
+}
+
 size_t vp_catalog_platform_items(const VpCatalog *catalog, const char *platform,
                                  size_t *indexes, size_t capacity) {
     size_t index;
@@ -376,6 +422,30 @@ size_t vp_catalog_platform_items(const VpCatalog *catalog, const char *platform,
         while (insertion > 0 &&
                vp_compare_item(&catalog->items[indexes[insertion - 1]],
                                &catalog->items[index]) > 0) {
+            indexes[insertion] = indexes[insertion - 1];
+            insertion--;
+        }
+        indexes[insertion] = index;
+        found++;
+    }
+    return found;
+}
+
+size_t vp_catalog_library_items(const VpCatalog *catalog, const char *platform,
+                                const VpLibraryFilters *filters, size_t *indexes, size_t capacity) {
+    size_t index;
+    size_t found = 0;
+    bool favorites;
+    if (catalog == NULL || platform == NULL || indexes == NULL || capacity == 0) return 0;
+    favorites = strcmp(platform, VP_FAVORITES_PLATFORM) == 0;
+    for (index = 0; index < catalog->count && found < capacity; index++) {
+        const VpItem *item = &catalog->items[index];
+        size_t insertion;
+        if (!vp_library_item_visible(item, filters)) continue;
+        if (favorites ? !item->favorite : strcmp(item->platform, platform) != 0) continue;
+        insertion = found;
+        while (insertion > 0 &&
+               vp_compare_item(&catalog->items[indexes[insertion - 1]], item) > 0) {
             indexes[insertion] = indexes[insertion - 1];
             insertion--;
         }
@@ -408,6 +478,10 @@ size_t vp_catalog_recent(const VpCatalog *catalog, size_t *indexes, size_t capac
 
 void vp_item_toggle_favorite(VpItem *item) {
     if (item != NULL) item->favorite = !item->favorite;
+}
+
+void vp_item_toggle_hidden(VpItem *item) {
+    if (item != NULL) item->hidden = !item->hidden;
 }
 
 void vp_item_mark_played(VpItem *item, unsigned long timestamp) {
@@ -770,7 +844,8 @@ size_t vp_app_visible(VpApp *app, size_t *indexes, size_t capacity) {
     size_t cursor;
     if (app == NULL || indexes == NULL) return 0;
     if (app->library_level != VP_LEVEL_ROMS) return 0;
-    count = vp_catalog_platform_items(&app->catalog, app->active_platform, indexes, capacity);
+    count = vp_catalog_library_items(&app->catalog, app->active_platform,
+                                     &app->library_filters, indexes, capacity);
     if (count == 0) {
         app->selected_item = 0;
         return 0;
@@ -784,9 +859,11 @@ size_t vp_app_visible(VpApp *app, size_t *indexes, size_t capacity) {
 
 void vp_app_select(VpApp *app, int direction) {
     size_t count;
+    size_t position = 0;
+    size_t cursor;
     if (app == NULL || direction == 0) return;
     if (app->library_level == VP_LEVEL_PLATFORMS) {
-        count = vp_platform_count(&app->catalog);
+        count = vp_app_platform_count(app);
         if (count == 0) {
             app->selected_platform = 0;
             return;
@@ -796,18 +873,24 @@ void vp_app_select(VpApp *app, int direction) {
         app->installation_armed = false;
         return;
     }
-    count = app->catalog.count;
+    count = vp_app_visible(app, vp_visible_scratch, VP_MAX_ITEMS);
     if (count == 0) {
         app->selected_item = 0;
         return;
     }
-    if (direction > 0) app->selected_item = (app->selected_item + 1) % count;
-    else app->selected_item = (app->selected_item + count - 1) % count;
+    for (cursor = 0; cursor < count; cursor++) {
+        if (vp_visible_scratch[cursor] == app->selected_item) {
+            position = cursor;
+            break;
+        }
+    }
+    position = vp_wrap_add(position, direction, count);
+    app->selected_item = vp_visible_scratch[position];
     app->installation_armed = false;
 }
 
 static void vp_move_platforms(VpApp *app, int dx, int dy, int columns) {
-    size_t count = vp_platform_count(&app->catalog);
+    size_t count = vp_app_platform_count(app);
     size_t rows;
     size_t row;
     size_t column;
@@ -877,7 +960,8 @@ void vp_app_move(VpApp *app, int dx, int dy, int columns) {
 void vp_app_open(VpApp *app) {
     size_t count;
     if (app == NULL || app->library_level == VP_LEVEL_ROMS) return;
-    count = vp_catalog_platforms(&app->catalog, vp_platform_scratch, VP_MAX_PLATFORMS);
+    count = vp_catalog_library_platforms(&app->catalog, &app->library_filters,
+                                         vp_platform_scratch, VP_MAX_LIBRARY_GROUPS);
     if (count == 0 || app->selected_platform >= count) return;
     vp_copy(app->active_platform, sizeof(app->active_platform),
             vp_platform_scratch[app->selected_platform].platform);
