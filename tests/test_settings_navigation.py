@@ -183,7 +183,7 @@ int main(void) {
         end = source.index("\ntypedef struct", start)
         handler = source[start:end]
         touch_start = source.index("static unsigned int touch_navigation_pressed(")
-        touch = source[touch_start:source.index("\nstatic unsigned int touch_tap_pressed(", touch_start)]
+        touch = source[touch_start:source.index("\nstatic int touch_coordinate_x(", touch_start)]
         prefix = r'''
 #include "vitashelflauncher.h"
 #include "ui_presentation.h"
@@ -202,6 +202,7 @@ static bool settings_detail_active, settings_integration_active;
 static bool settings_ime_active;
 static VpApp app;
 static size_t platform_group_count,visible_count_cache,visible_indexes[256];
+static size_t list_start,grid_start;
 static VpUiConsoleMotion console_motion;
 static int vp_ui_touch_platform(int x,int y) { return vp_ui_console_motion_touch(&console_motion,x,y); }
 static VpUiPreferences ui_preferences=VP_UI_PREFERENCES_DEFAULT;
@@ -218,11 +219,6 @@ static struct {
 } background_job = {.mutex=PTHREAD_MUTEX_INITIALIZER};
 static void vp_ui_audio_play(int sound) { (void)sound; }
 static void refresh_catalog_view_cache(VpApp *value) { (void)value; }
-static size_t visible_position(const size_t *indexes,size_t count,size_t item) {
-    size_t i;
-    for (i=0;i<count;i++) if (indexes[i]==item) return i;
-    return 0;
-}
 static void request_romm_check(void) { checks++; }
 static void show_notification(VpApp *app, const char *format, ...) { (void)app; (void)format; }
 static bool start_next_download(void) { return false; }
@@ -376,6 +372,25 @@ int main(void) {
     row=vp_ui_console_motion_tile(&console_motion,6);
     assert(touch_navigation_pressed(row.x+row.w/2,row.y+row.h/2)==0);
     assert(app.selected_platform==6);
+    app.library_level=VP_LEVEL_ROMS; app.active_view=VP_VIEW_LIST;
+    visible_count_cache=8; list_start=5;
+    for (size_t i=0;i<8;i++) visible_indexes[i]=20+i;
+    app.selected_item=25;
+    row=vp_ui_list_row(0);
+    assert(touch_navigation_pressed(row.x+10,row.y+10)==SCE_CTRL_CROSS);
+    row=vp_ui_list_row(1);
+    assert(touch_navigation_pressed(row.x+10,row.y+10)==0 && app.selected_item==26);
+    row=vp_ui_list_row(4);
+    assert(touch_navigation_pressed(row.x+10,row.y+10)==0 && app.selected_item==26);
+    app.active_view=VP_VIEW_GRID; visible_count_cache=12; grid_start=1;
+    for (size_t i=0;i<12;i++) visible_indexes[i]=30+i;
+    app.selected_item=35;
+    row=vp_ui_tile(0);
+    assert(touch_navigation_pressed(row.x+10,row.y+10)==SCE_CTRL_CROSS);
+    row=vp_ui_tile(6);
+    assert(touch_navigation_pressed(row.x+10,row.y+10)==0 && app.selected_item==41);
+    row=vp_ui_tile(7);
+    assert(touch_navigation_pressed(row.x+10,row.y+10)==0 && app.selected_item==41);
     puts("Settings controller/touch navigation, appearance, nested RomM and download actions: PASS");
 }
 '''

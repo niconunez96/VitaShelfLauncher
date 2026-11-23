@@ -103,6 +103,13 @@ void vp_ui_console_motion_update(VpUiConsoleMotion *m, size_t selected, size_t t
     m->selected=selected; m->changed_at=now;
 }
 
+void vp_ui_console_motion_drag(VpUiConsoleMotion *m, float position, unsigned long long now) {
+    if (!m->count) return;
+    m->scroll=vp_ui_scroll_clamp(position,m->count,VP_UI_CONSOLE_PAGE);
+    m->from_scroll=m->scroll;
+    m->changed_at=now;
+}
+
 VpUiRect vp_ui_console_motion_tile(const VpUiConsoleMotion *m, size_t index) {
     VpUiRect r=vp_ui_console_tile(0);
     float lift=index<m->count?m->lift[index]:0;
@@ -120,6 +127,40 @@ bool vp_ui_console_motion_visible(const VpUiConsoleMotion *m, size_t index) {
 
 VpUiRect vp_ui_list_row(size_t slot) {
     VpUiRect r = {64, 170 + (int)slot * 54, 284, 48};
+    return r;
+}
+
+float vp_ui_scroll_clamp(float position, size_t count, size_t page) {
+    float last=count>page?(float)(count-page):0;
+    return fmaxf(0,fminf(position,last));
+}
+
+size_t vp_ui_list_start(size_t selected, size_t count, size_t start) {
+    if (selected<start) start=selected;
+    if (selected>=start+VP_UI_LIST_PAGE) start=selected-VP_UI_LIST_PAGE+1;
+    return (size_t)vp_ui_scroll_clamp((float)start,count,VP_UI_LIST_PAGE);
+}
+
+VpUiRect vp_ui_scrolled_list_row(size_t index, float scroll) {
+    VpUiRect r=vp_ui_list_row(0);
+    r.y+=(int)lroundf(((float)index-scroll)*54.f);
+    return r;
+}
+
+size_t vp_ui_grid_rows(size_t count) {
+    return (count+VP_UI_GRID_COLUMNS-1)/VP_UI_GRID_COLUMNS;
+}
+
+size_t vp_ui_grid_start(size_t selected, size_t count, size_t start) {
+    size_t row=selected/VP_UI_GRID_COLUMNS;
+    if (row<start) start=row;
+    if (row>=start+VP_UI_GRID_ROWS) start=row-VP_UI_GRID_ROWS+1;
+    return (size_t)vp_ui_scroll_clamp((float)start,vp_ui_grid_rows(count),VP_UI_GRID_ROWS);
+}
+
+VpUiRect vp_ui_scrolled_grid_tile(size_t index, float scroll) {
+    VpUiRect r=vp_ui_tile(index%VP_UI_GRID_COLUMNS);
+    r.y+=(int)lroundf(((float)(index/VP_UI_GRID_COLUMNS)-scroll)*160.f);
     return r;
 }
 
@@ -158,6 +199,31 @@ void vp_ui_carousel_motion_update(VpUiCarouselMotion *m, size_t selected, size_t
     m->from_scroll=m->scroll;
     m->from_pop=m->pop;
     m->selected=selected; m->changed_at=now;
+}
+
+void vp_ui_carousel_motion_drag(VpUiCarouselMotion *m, float position, unsigned long long now) {
+    if (!m->count) return;
+    /* Keep a signed virtual position so crossing either seam preserves motion. */
+    m->scroll=m->count>1?position:0;
+    m->from_scroll=m->scroll;
+    m->pop=0;
+    m->from_pop=0;
+    m->changed_at=now;
+}
+
+void vp_ui_carousel_motion_rebase(VpUiCarouselMotion *m) {
+    float shift;
+    if (!m->count) return;
+    shift=roundf(((float)m->selected-m->scroll)/(float)m->count)*(float)m->count;
+    m->scroll+=shift;
+    m->from_scroll+=shift;
+}
+
+size_t vp_ui_wrap_index(int position, size_t count) {
+    int index;
+    if (!count) return 0;
+    index=position%(int)count;
+    return (size_t)(index<0?index+(int)count:index);
 }
 
 float vp_ui_carousel_motion_focus(const VpUiCarouselMotion *m, int position) {

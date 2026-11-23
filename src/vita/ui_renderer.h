@@ -14,7 +14,7 @@ typedef struct {
     size_t group_count;
     const size_t *visible;
     size_t visible_count;
-    vita2d_texture *covers[VP_UI_GRID_PAGE];
+    vita2d_texture *covers[VP_UI_GRID_WINDOW];
     vita2d_texture *background;
     const VpDownloadQueue *downloads;
     size_t download_selection;
@@ -38,11 +38,16 @@ typedef struct {
     int battery_percent;
     bool battery_charging;
     unsigned long long storage_free, storage_total;
+    bool touch_scrolling;
+    float touch_scroll, list_scroll, grid_scroll;
+    int carousel_base;
+    vita2d_texture *selected_cover;
 } VpUiFrame;
 
 void vp_ui_prepare(const VpUiFrame *frame);
 void vp_ui_render(const VpUiFrame *frame);
 void vp_ui_load_theme(const char *ini);
 int vp_ui_touch_platform(int x, int y);
+float vp_ui_scroll_origin(VpLibraryLevel level);
 void vp_ui_shutdown(void);
 #endif

@@ -37,8 +37,12 @@ static unsigned int last_notice_id;
 static VpUiAppearance appearance={180,14,255};
 static VpUiConsoleMotion console_motion;
 static VpUiCarouselMotion carousel_motion;
+static bool carousel_touch_scrolling;
 
 int vp_ui_touch_platform(int x,int y) { return vp_ui_console_motion_touch(&console_motion,x,y); }
+float vp_ui_scroll_origin(VpLibraryLevel level) {
+    return level==VP_LEVEL_PLATFORMS?console_motion.scroll:carousel_motion.scroll;
+}
 
 void vp_ui_load_theme(const char *ini) { vp_ui_appearance_load(&appearance,ini); }
 static unsigned int alpha(unsigned int c,unsigned int a) { return (c&0xffffffu)|(a<<24); }
@@ -235,9 +239,12 @@ void vp_ui_prepare(const VpUiFrame *f) {
         f->app->active_view==VP_VIEW_CAROUSEL && f->visible_count>0;
     asset_budget=3;
     for (i=0;i<sizeof(common)/sizeof(common[0]);i++) (void)asset(common[i]);
+    unsigned long long now=sceKernelGetProcessTimeWide();
     if (platforms) {
         vp_ui_console_motion_update(&console_motion,f->app->selected_platform,f->group_count,
-            sceKernelGetProcessTimeWide(),appearance.motion_ms);
+            now,appearance.motion_ms);
+        if (f->touch_scrolling)
+            vp_ui_console_motion_drag(&console_motion,f->touch_scroll,now);
         (void)asset("console_surface"); (void)asset("console_focus");
         for (i=0;i<f->group_count;i++) if (vp_ui_console_motion_visible(&console_motion,i))
             (void)asset(vp_ui_platform(f->groups[i].platform)->asset);
@@ -248,10 +255,15 @@ void vp_ui_prepare(const VpUiFrame *f) {
         if (f->settings_detail && f->settings_section==VP_SETTINGS_APPEARANCE)
             for (i=0;i<VP_UI_WALLPAPER_COUNT;i++) (void)asset(vp_ui_wallpaper((int)i)->thumbnail);
     }
-    if (carousel)
+    if (carousel) {
+        if (carousel_touch_scrolling && !f->touch_scrolling)
+            vp_ui_carousel_motion_rebase(&carousel_motion);
         vp_ui_carousel_motion_update(&carousel_motion,position(f),f->visible_count,
-            sceKernelGetProcessTimeWide(),appearance.motion_ms);
-    else memset(&carousel_motion,0,sizeof(carousel_motion));
+            now,appearance.motion_ms);
+        if (f->touch_scrolling)
+            vp_ui_carousel_motion_drag(&carousel_motion,f->touch_scroll,now);
+    } else memset(&carousel_motion,0,sizeof(carousel_motion));
+    carousel_touch_scrolling=carousel && f->touch_scrolling;
     if (heading_asset(f)) (void)asset(heading_asset(f));
     asset_budget=0;
     vp_ui_backdrop_prepare(f->preferences.wallpaper,sceKernelGetProcessTimeWide());
@@ -347,29 +359,27 @@ static void cover(vita2d_texture *texture,const VpItem *item,VpUiRect r,unsigned
     }
 }
 
-static void carousel_card(const VpUiFrame *f,int position,size_t base) {
-    int count=(int)f->visible_count,slot=position%count;
-    size_t index;
+static void carousel_card(const VpUiFrame *f,int position,int base) {
+    size_t index=vp_ui_wrap_index(base+position,f->visible_count);
     VpUiRect r;
     float weight;
     unsigned int tint;
-    if (slot<0) slot+=count;
-    index=(base+f->visible_count+(size_t)slot)%f->visible_count;
-    r=vp_ui_carousel_motion_tile(&carousel_motion,(int)base+position);
-    weight=vp_ui_carousel_motion_focus(&carousel_motion,(int)base+position);
+    r=vp_ui_carousel_motion_tile(&carousel_motion,base+position);
+    weight=vp_ui_carousel_motion_focus(&carousel_motion,base+position);
     tint=alpha(mix(C(245,248,255,255),0xffffffffu,weight),(unsigned int)(210+45.f*weight));
     cover(f->covers[position+VP_UI_CAROUSEL_REACH],&f->app->catalog.items[f->visible[index]],r,tint);
     if (position) vita2d_draw_rectangle(r.x,r.y+r.h+4,r.w,18,C(148,175,233,35));
     else focus(r);
 }
 
-static void carousel_cards(const VpUiFrame *f,size_t base) {
+static void carousel_cards(const VpUiFrame *f,int base) {
     int position,count=(int)f->visible_count;
+    int first=-count/2;
+    if (!(count%2) && carousel_motion.scroll>=(float)base) first++;
     for (position=-VP_UI_CAROUSEL_REACH;position<=VP_UI_CAROUSEL_REACH;position++) {
-        float offset=(float)((int)base+position)-carousel_motion.scroll;
+        float offset=(float)(base+position)-carousel_motion.scroll;
         if (fabsf(offset)>VP_UI_CAROUSEL_PAGE/2.f+.5f) continue;
-        if (count<VP_UI_CAROUSEL_PAGE && abs(position)>count/2) continue;
-        if (!(count%2) && position<0 && abs(position)==count/2) continue;
+        if (count<VP_UI_CAROUSEL_PAGE && (position<first || position>=first+count)) continue;
         if (!position) continue;
         carousel_card(f,position,base);
     }
@@ -386,42 +396,54 @@ static void roms(const VpUiFrame *f) {
     size_t pos=position(f),i,start;
     const VpItem *selected=&f->app->catalog.items[f->visible[pos]];
     if (f->app->active_view==VP_VIEW_GRID) {
-        start=(pos/VP_UI_GRID_PAGE)*VP_UI_GRID_PAGE;
-        for (i=start;i<f->visible_count && i<start+VP_UI_GRID_PAGE;i++) {
+        float scroll=f->grid_scroll;
+        size_t window=scroll>floorf(scroll)?VP_UI_GRID_WINDOW:VP_UI_GRID_PAGE;
+        start=(size_t)floorf(scroll)*VP_UI_GRID_COLUMNS;
+        vita2d_set_clip_rectangle(24,148,944,480);
+        vita2d_enable_clipping();
+        for (i=start;i<f->visible_count && i<start+window;i++) {
             const VpItem *item=&f->app->catalog.items[f->visible[i]];
-            bool active=i==pos; VpUiRect r=vp_ui_tile(i-start);
+            bool active=i==pos; VpUiRect r=vp_ui_scrolled_grid_tile(i,scroll);
             cover(f->covers[i-start],item,r,0xffffffffu);
             if (active) {
                 const char *platform=vp_ui_platform_label(item->platform);
                 int tag_width=vp_ui_text_width(f->font,VP_TYPE_GRID_TITLE,false,platform)+14;
                 if (tag_width>68) tag_width=68;
                 round_rect(r.x,r.y+r.h-29,r.w,29,8,C(13,32,79,225));
-                text(f,VP_TYPE_GRID_TITLE,r.x+9,r.y+r.h-10,r.w-tag_width-19,C(250,252,255,255),item->title);
-                tag(f,r.x+r.w-tag_width-4,r.y+r.h-25,tag_width,platform);
+                if (r.y+r.h-10>=148 && r.y+r.h-10<=480) {
+                    text(f,VP_TYPE_GRID_TITLE,r.x+9,r.y+r.h-10,r.w-tag_width-19,C(250,252,255,255),item->title);
+                    tag(f,r.x+r.w-tag_width-4,r.y+r.h-25,tag_width,platform);
+                }
                 focus(r);
             }
             if (item->favorite) icon("ui_star",r.x+r.w-25,r.y+5,20);
             icon(item->installed?"ui_check":"ui_download",r.x+5,r.y+5,19);
         }
+        vita2d_disable_clipping();
     } else if (f->app->active_view==VP_VIEW_LIST) {
         VpUiRect hero={382,160,212,262};
-        start=(pos/VP_UI_LIST_PAGE)*VP_UI_LIST_PAGE;
+        float scroll=f->list_scroll;
+        start=(size_t)floorf(scroll);
         round_rect(37,174,3,258,1,C(235,244,255,140));
-        round_rect(36,174+(int)(pos-start)*52,5,44,2,C(28,94,203,210));
-        for (i=start;i<f->visible_count && i<start+VP_UI_LIST_PAGE;i++) {
+        vita2d_set_clip_rectangle(48,166,356,440);
+        vita2d_enable_clipping();
+        for (i=start;i<f->visible_count && i<start+VP_UI_LIST_PAGE+1;i++) {
             const VpItem *item=&f->app->catalog.items[f->visible[i]];
-            VpUiRect r=vp_ui_list_row(i-start); bool active=i==pos;
+            VpUiRect r=vp_ui_scrolled_list_row(i,scroll); bool active=i==pos;
             if (active) glass(r,true,false);
             fit(f->covers[i-start],r.x+10,r.y+4,38,40,0xffffffffu);
             vp_ui_text(f->font,VP_TYPE_LIST_TITLE,active,r.x+62,r.y+29,r.w-74,panel_primary,item->title);
         }
-        cover(f->covers[pos-start],selected,hero,0xffffffffu); focus(hero);
+        vita2d_disable_clipping();
+        if ((float)pos>=scroll && (float)pos<scroll+VP_UI_LIST_PAGE)
+            round_rect(36,174+(int)lroundf(((float)pos-scroll)*54.f),5,44,2,C(28,94,203,210));
+        cover(f->selected_cover,selected,hero,0xffffffffu); focus(hero);
         text(f,VP_TYPE_HERO_TITLE,620,203,300,wall_primary,selected->title);
         tag(f,620,218,86,vp_ui_platform_label(selected->platform));
         vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,620,269,292,8,wall_muted,
             selected->description[0]?selected->description:"Sin descripción disponible.");
     } else {
-        carousel_cards(f,pos);
+        carousel_cards(f,f->touch_scrolling?f->carousel_base:(int)pos);
         {
             int title_width=vp_ui_text_width(f->font,VP_TYPE_HERO_TITLE,false,selected->title);
             const char *platform=vp_ui_platform_label(selected->platform);
@@ -722,4 +744,5 @@ void vp_ui_shutdown(void) {
     last_notice[0]='\0'; last_notice_id=0;
     memset(&console_motion,0,sizeof(console_motion));
     memset(&carousel_motion,0,sizeof(carousel_motion));
+    carousel_touch_scrolling=false;
 }

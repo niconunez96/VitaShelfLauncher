@@ -36,6 +36,9 @@ typedef enum {
     VP_INTEGRATION_COUNT
 } VpIntegration;
 #define VP_UI_GRID_PAGE 10
+#define VP_UI_GRID_COLUMNS 5
+#define VP_UI_GRID_ROWS 2
+#define VP_UI_GRID_WINDOW (VP_UI_GRID_PAGE + VP_UI_GRID_COLUMNS)
 #define VP_UI_LIST_PAGE 5
 #define VP_UI_CONSOLE_PAGE 6
 #define VP_UI_CAROUSEL_PAGE 7
@@ -52,12 +55,22 @@ typedef struct {
     float scroll, from_scroll, pop, from_pop;
 } VpUiCarouselMotion;
 void vp_ui_console_motion_update(VpUiConsoleMotion *motion, size_t selected, size_t total,
-                                 unsigned long long now, int duration_ms);
+                                  unsigned long long now, int duration_ms);
+void vp_ui_console_motion_drag(VpUiConsoleMotion *motion, float position, unsigned long long now);
 VpUiRect vp_ui_console_motion_tile(const VpUiConsoleMotion *motion, size_t index);
 bool vp_ui_console_motion_visible(const VpUiConsoleMotion *motion, size_t index);
 int vp_ui_console_motion_touch(const VpUiConsoleMotion *motion, int x, int y);
 void vp_ui_carousel_motion_update(VpUiCarouselMotion *motion, size_t selected, size_t total,
-                                  unsigned long long now, int duration_ms);
+                                   unsigned long long now, int duration_ms);
+void vp_ui_carousel_motion_drag(VpUiCarouselMotion *motion, float position, unsigned long long now);
+void vp_ui_carousel_motion_rebase(VpUiCarouselMotion *motion);
+size_t vp_ui_wrap_index(int position, size_t count);
+float vp_ui_scroll_clamp(float position, size_t count, size_t page);
+size_t vp_ui_list_start(size_t selected, size_t count, size_t start);
+size_t vp_ui_grid_rows(size_t count);
+size_t vp_ui_grid_start(size_t selected, size_t count, size_t start);
+VpUiRect vp_ui_scrolled_grid_tile(size_t index, float scroll);
+VpUiRect vp_ui_scrolled_list_row(size_t index, float scroll);
 VpUiRect vp_ui_carousel_motion_tile(const VpUiCarouselMotion *motion, int position);
 float vp_ui_carousel_motion_focus(const VpUiCarouselMotion *motion, int position);
 const VpUiPlatform *vp_ui_platform(const char *slug);
