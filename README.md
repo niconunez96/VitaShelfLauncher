@@ -91,6 +91,9 @@ Artwork is resized through the shared image service and cached on the Vita. Only
 
 Human contributors: see [DEVELOPMENT.md](DEVELOPMENT.md). AI agents: begin with [agents.md](agents.md).
 
-## License and acknowledgements
+## License and acknowledgements / Licencia y agradecimientos
+
+VitaShelf Launcher is licensed under the GNU General Public License v3.0 — see [LICENSE](LICENSE).
+VitaShelf Launcher se distribuye bajo la GNU General Public License v3.0 — véase [LICENSE](LICENSE).
 
 Third-party asset notices are included under `assets/blueglass/`.
