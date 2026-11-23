@@ -14,6 +14,7 @@
 #include <curl/curl.h>
 
 #include <pthread.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,6 +50,7 @@
 #define VP_TOUCH_WIDTH 1920
 #define VP_TOUCH_HEIGHT 1088
 #define VP_TOUCH_TAP_SLOP 32
+#define VP_TOUCH_SWIPE_SLOP 32
 static VpRommConfig romm_config;
 static VpHomebrewConfig homebrew_config;
 static VpLaunchConfig launch_config;
@@ -73,6 +75,23 @@ static char catalog_synced_at[32];
 static bool settings_ime_active;
 static SceWChar16 settings_ime_buffer[VP_URL];
 static unsigned long long installation_armed_at;
+typedef enum { VP_TOUCH_AXIS_NONE, VP_TOUCH_AXIS_HORIZONTAL, VP_TOUCH_AXIS_VERTICAL } VpTouchAxis;
+typedef struct {
+    bool active, dragging, settling, moved, cancelled;
+    int start_x, start_y, last_x, last_y;
+    VpTouchAxis axis;
+    VpLibraryLevel level;
+    VpView view;
+    size_t count, selected;
+    char platform[VP_TEXT];
+    float origin, position, from_position, target;
+    unsigned long long released_at;
+} VpTouchGesture;
+static VpTouchGesture touch_gesture;
+static size_t list_start;
+static size_t list_selected=VP_MAX_ITEMS;
+static size_t grid_start;
+static size_t grid_selected=VP_MAX_ITEMS;
 
 typedef enum {
     VP_JOB_NONE,
@@ -125,7 +144,8 @@ static VpBackgroundJob background_job = {
     .mutex = PTHREAD_MUTEX_INITIALIZER
 };
 static VpDownloadQueue download_queue;
-#define VP_COVER_SLOTS 12
+/* Three grid rows can be visible during a drag; retain the selected cover too. */
+#define VP_COVER_SLOTS (VP_UI_GRID_WINDOW + 1)
 static VpPlatformGroup platform_groups[VP_MAX_PLATFORMS];
 static size_t visible_indexes[VP_MAX_ITEMS];
 static size_t platform_group_count;
@@ -1684,6 +1704,32 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
         }
     }
 
+    frame->touch_scrolling=touch_gesture.dragging || touch_gesture.settling;
+    frame->touch_scroll=touch_gesture.position;
+    if (app->active_screen==VP_SCREEN_LIBRARY && app->library_level==VP_LEVEL_ROMS &&
+        app->active_view==VP_VIEW_LIST) {
+        if (!frame->touch_scrolling) {
+            if (list_selected!=app->selected_item)
+                list_start=vp_ui_list_start(visible_position(visible_indexes,visible_count,app->selected_item),visible_count,list_start);
+            else list_start=(size_t)vp_ui_scroll_clamp((float)list_start,visible_count,VP_UI_LIST_PAGE);
+        }
+        list_selected=app->selected_item;
+        frame->list_scroll=frame->touch_scrolling?touch_gesture.position:(float)list_start;
+    } else { list_start=0; list_selected=VP_MAX_ITEMS; }
+    if (app->active_screen==VP_SCREEN_LIBRARY && app->library_level==VP_LEVEL_ROMS &&
+        app->active_view==VP_VIEW_GRID) {
+        if (!frame->touch_scrolling) {
+            if (grid_selected!=app->selected_item)
+                grid_start=vp_ui_grid_start(visible_position(visible_indexes,visible_count,app->selected_item),visible_count,grid_start);
+            else grid_start=(size_t)vp_ui_scroll_clamp((float)grid_start,vp_ui_grid_rows(visible_count),VP_UI_GRID_ROWS);
+        }
+        grid_selected=app->selected_item;
+        frame->grid_scroll=frame->touch_scrolling?touch_gesture.position:(float)grid_start;
+    } else { grid_start=0; grid_selected=VP_MAX_ITEMS; }
+    if (visible_count && app->active_view==VP_VIEW_CAROUSEL)
+        frame->carousel_base=frame->touch_scrolling?(int)lroundf(touch_gesture.position):
+            (int)visible_position(visible_indexes,visible_count,app->selected_item);
+
     if (app->active_screen == VP_SCREEN_LIBRARY) {
         if (app->library_level == VP_LEVEL_ROMS) {
             size_t page_size = vp_ui_page_size(app->active_view);
@@ -1691,7 +1737,15 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
             size_t start;
             position = visible_position(visible_indexes, visible_count, app->selected_item);
             start = (position / page_size) * page_size;
+            if (app->active_view==VP_VIEW_LIST) {
+                start=(size_t)floorf(frame->list_scroll);
+                page_size=VP_UI_LIST_PAGE+1;
+            } else if (app->active_view==VP_VIEW_GRID) {
+                start=(size_t)floorf(frame->grid_scroll)*VP_UI_GRID_COLUMNS;
+                page_size=VP_UI_GRID_WINDOW;
+            }
             if (visible_count && app->active_view == VP_VIEW_CAROUSEL) {
+                position=vp_ui_wrap_index(frame->carousel_base,visible_count);
                 cover_indexes[cover_count++] = visible_indexes[position];
                 for (int distance=1;distance<=VP_UI_CAROUSEL_REACH;distance++) {
                     cover_indexes[cover_count++] = visible_indexes[(position+visible_count-(size_t)distance%visible_count)%visible_count];
@@ -1722,12 +1776,20 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
         size_t position = visible_position(visible_indexes, visible_count, app->selected_item);
         size_t page = vp_ui_page_size(app->active_view);
         size_t start = (position / page) * page;
+        frame->selected_cover=cover_texture_for(app->catalog.items[app->selected_item].id);
         if (app->active_view == VP_VIEW_CAROUSEL) {
             for (int offset=-VP_UI_CAROUSEL_REACH;offset<=VP_UI_CAROUSEL_REACH;offset++) {
-                size_t slot=(position+visible_count+(size_t)((offset+(int)visible_count)%(int)visible_count))%visible_count;
+                size_t slot=vp_ui_wrap_index(frame->carousel_base+offset,visible_count);
                 frame->covers[offset+VP_UI_CAROUSEL_REACH] = cover_texture_for(app->catalog.items[visible_indexes[slot]].id);
             }
         } else {
+            if (app->active_view==VP_VIEW_LIST) {
+                start=(size_t)floorf(frame->list_scroll);
+                page=VP_UI_LIST_PAGE+1;
+            } else if (app->active_view==VP_VIEW_GRID) {
+                start=(size_t)floorf(frame->grid_scroll)*VP_UI_GRID_COLUMNS;
+                page=VP_UI_GRID_WINDOW;
+            }
             for (index = start; index < visible_count && index < start + page; index++)
                 frame->covers[index - start] = cover_texture_for(app->catalog.items[visible_indexes[index]].id);
         }
@@ -1828,9 +1890,8 @@ static unsigned int touch_navigation_pressed(int x, int y) {
         }
         slot = app.active_view == VP_VIEW_GRID ? vp_ui_touch_tile_slot(x, y) : vp_ui_touch_list_slot(x, y);
         if (slot >= 0) {
-            size_t page = vp_ui_page_size(app.active_view);
-            size_t position = visible_position(visible_indexes, visible_count_cache, app.selected_item);
-            size_t target = (position / page) * page + (size_t)slot;
+            size_t start=app.active_view==VP_VIEW_LIST?list_start:grid_start*VP_UI_GRID_COLUMNS;
+            size_t target=start+(size_t)slot;
             if (target >= visible_count_cache) return 0;
             if (visible_indexes[target] != app.selected_item) {
                 app.selected_item = visible_indexes[target];
@@ -1878,26 +1939,141 @@ static unsigned int touch_navigation_pressed(int x, int y) {
     return 0;
 }
 
-static unsigned int touch_tap_pressed(SceTouchData *touch, bool *active,
-                                      int *start_x, int *start_y, int *last_x, int *last_y) {
+static int touch_coordinate_x(int raw) { return raw * 960 / VP_TOUCH_WIDTH; }
+static int touch_coordinate_y(int raw) { return raw * 544 / VP_TOUCH_HEIGHT; }
+
+static bool touch_drag_allowed(int raw_x, int raw_y, VpTouchAxis axis) {
+    int x=touch_coordinate_x(raw_x),y=touch_coordinate_y(raw_y);
+    if (app.active_screen!=VP_SCREEN_LIBRARY) return false;
+    if (app.library_level==VP_LEVEL_PLATFORMS)
+        return axis==VP_TOUCH_AXIS_HORIZONTAL && x>=24 && x<944 && y>=210 && y<444;
+    if (app.active_view==VP_VIEW_LIST)
+        return axis==VP_TOUCH_AXIS_VERTICAL && x>=48 && x<356 && y>=166 && y<440;
+    if (app.active_view==VP_VIEW_GRID)
+        return axis==VP_TOUCH_AXIS_VERTICAL && x>=24 && x<944 && y>=148 && y<480;
+    return app.active_view==VP_VIEW_CAROUSEL && axis==VP_TOUCH_AXIS_HORIZONTAL &&
+        x>=24 && x<936 && y>=150 && y<410;
+}
+
+static bool touch_context_matches(const VpTouchGesture *gesture) {
+    size_t count=app.library_level==VP_LEVEL_PLATFORMS?platform_group_count:visible_count_cache;
+    size_t selected=app.library_level==VP_LEVEL_PLATFORMS?app.selected_platform:app.selected_item;
+    return app.active_screen==VP_SCREEN_LIBRARY && app.library_level==gesture->level &&
+        app.active_view==gesture->view && !strcmp(app.active_platform,gesture->platform) &&
+        count==gesture->count && selected==gesture->selected;
+}
+
+static void touch_scroll_tick(VpTouchGesture *gesture, unsigned long long now) {
+    if (!gesture->dragging && !gesture->settling) return;
+    if (!touch_context_matches(gesture)) {
+        gesture->dragging=gesture->settling=false;
+        gesture->cancelled=true;
+        return;
+    }
+    if (gesture->settling) {
+        float progress=now>=gesture->released_at?(float)(now-gesture->released_at)/180000.f:0;
+        gesture->position=gesture->from_position+(gesture->target-gesture->from_position)*vp_ui_ease(progress);
+        if (progress>=1) {
+            gesture->position=gesture->target;
+            gesture->settling=false;
+        }
+    }
+}
+
+static void touch_scroll_release(VpTouchGesture *gesture) {
+    size_t before=app.library_level==VP_LEVEL_PLATFORMS?app.selected_platform:
+        visible_position(visible_indexes,visible_count_cache,app.selected_item);
+    size_t target=before;
+    float delta=gesture->position-gesture->origin;
+    gesture->target=roundf(gesture->position);
+    if (app.library_level==VP_LEVEL_PLATFORMS) {
+        target=(size_t)vp_ui_scroll_clamp((float)before+roundf(delta),gesture->count,1);
+        gesture->target=(float)vp_ui_console_start(target,gesture->count);
+    } else if (app.active_view==VP_VIEW_LIST) {
+        list_start=(size_t)gesture->target;
+    } else if (app.active_view==VP_VIEW_GRID) {
+        grid_start=(size_t)gesture->target;
+    } else target=vp_ui_wrap_index((int)gesture->target,gesture->count);
+    if (target!=before) {
+        int columns=app.library_level==VP_LEVEL_PLATFORMS?(int)gesture->count:1;
+        vp_app_move(&app,(int)target-(int)before,0,columns);
+        vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
+    }
+    gesture->selected=app.library_level==VP_LEVEL_PLATFORMS?app.selected_platform:app.selected_item;
+    gesture->from_position=gesture->position;
+    gesture->released_at=sceKernelGetProcessTimeWide();
+    gesture->dragging=false;
+    gesture->settling=true;
+}
+
+static unsigned int touch_gesture_pressed(SceTouchData *touch, VpTouchGesture *gesture) {
     if (touch->reportNum > 0) {
         int x = (int)touch->report[0].x;
         int y = (int)touch->report[0].y;
-        if (!*active) {
-            *start_x = x;
-            *start_y = y;
-            *active = true;
+        if (!gesture->active) {
+            bool interrupted=gesture->settling;
+            float current=gesture->position;
+            memset(gesture,0,sizeof(*gesture));
+            gesture->start_x = x;
+            gesture->start_y = y;
+            gesture->active = true;
+            gesture->moved=interrupted;
+            gesture->level=app.library_level;
+            gesture->view=app.active_view;
+            gesture->count=app.library_level==VP_LEVEL_PLATFORMS?platform_group_count:visible_count_cache;
+            gesture->selected=app.library_level==VP_LEVEL_PLATFORMS?app.selected_platform:app.selected_item;
+            (void)snprintf(gesture->platform,sizeof(gesture->platform),"%s",app.active_platform);
+            gesture->origin=interrupted?current:
+                (app.library_level==VP_LEVEL_ROMS && app.active_view==VP_VIEW_LIST?
+                 (float)list_start:(app.library_level==VP_LEVEL_ROMS && app.active_view==VP_VIEW_GRID?
+                 (float)grid_start:vp_ui_scroll_origin(app.library_level)));
         }
-        *last_x = x;
-        *last_y = y;
+        gesture->last_x = x;
+        gesture->last_y = y;
+        if (touch->reportNum!=1) gesture->cancelled=true;
+        if (gesture->cancelled) gesture->dragging=false;
+        if (!gesture->dragging && !gesture->cancelled &&
+            (abs(x-gesture->start_x)>VP_TOUCH_SWIPE_SLOP || abs(y-gesture->start_y)>VP_TOUCH_SWIPE_SLOP)) {
+            VpTouchAxis axis=abs(x-gesture->start_x)>=abs(y-gesture->start_y)?
+                VP_TOUCH_AXIS_HORIZONTAL:VP_TOUCH_AXIS_VERTICAL;
+            gesture->moved=true;
+            if (gesture->count && touch_drag_allowed(gesture->start_x,gesture->start_y,axis) && touch_context_matches(gesture)) {
+                gesture->dragging=true;
+                gesture->axis=axis;
+            } else gesture->cancelled=true;
+        }
+        if (gesture->dragging && !gesture->cancelled) {
+            int delta=gesture->axis==VP_TOUCH_AXIS_HORIZONTAL?
+                touch_coordinate_x(x-gesture->start_x):touch_coordinate_y(y-gesture->start_y);
+            float stride=app.library_level==VP_LEVEL_PLATFORMS?148.f:
+                (app.active_view==VP_VIEW_LIST?54.f:(app.active_view==VP_VIEW_GRID?160.f:132.f));
+            size_t page=app.library_level==VP_LEVEL_PLATFORMS?VP_UI_CONSOLE_PAGE:
+                (app.active_view==VP_VIEW_LIST?VP_UI_LIST_PAGE:(app.active_view==VP_VIEW_GRID?VP_UI_GRID_ROWS:1));
+            size_t count=app.library_level==VP_LEVEL_ROMS && app.active_view==VP_VIEW_GRID?
+                vp_ui_grid_rows(gesture->count):gesture->count;
+            float position=gesture->origin-(float)delta/stride;
+            if (app.library_level==VP_LEVEL_ROMS && app.active_view==VP_VIEW_CAROUSEL)
+                gesture->position=count>1?position:0;
+            else gesture->position=vp_ui_scroll_clamp(position,count,page);
+        }
         return 0;
     }
-    if (!*active) return 0;
-    *active = false;
-    if (abs(*last_x - *start_x) > VP_TOUCH_TAP_SLOP || abs(*last_y - *start_y) > VP_TOUCH_TAP_SLOP)
+    if (!gesture->active) return 0;
+    gesture->active = false;
+    if (gesture->cancelled) {
+        gesture->dragging=false;
         return 0;
-    return touch_navigation_pressed(*last_x * 960 / VP_TOUCH_WIDTH,
-                                    *last_y * 544 / VP_TOUCH_HEIGHT);
+    }
+    if (gesture->dragging) {
+        if (touch_context_matches(gesture)) touch_scroll_release(gesture);
+        else gesture->dragging=false;
+        return 0;
+    }
+    if (gesture->moved || abs(gesture->last_x-gesture->start_x)>VP_TOUCH_TAP_SLOP ||
+        abs(gesture->last_y-gesture->start_y)>VP_TOUCH_TAP_SLOP)
+        return 0;
+    return touch_navigation_pressed(touch_coordinate_x(gesture->last_x),
+                                     touch_coordinate_y(gesture->last_y));
 }
 
 static void handle_app_events(VpApp *app, bool *quit) {
@@ -1943,8 +2119,6 @@ int main(void) {
     bool curl_cleanup_allowed;
     bool request_quit = false;
     bool rendered_once = false;
-    bool touch_active = false;
-    int touch_start_x = 0, touch_start_y = 0, touch_last_x = 0, touch_last_y = 0;
     vp_app_init(&app);
     vp_download_queue_init(&download_queue);
     vp_launch_config_init(&launch_config);
@@ -1993,10 +2167,19 @@ int main(void) {
         sceCtrlPeekBufferPositive(0, &pad, 1);
         pressed = pad.buttons & ~previous;
         previous = pad.buttons;
+        if (pressed || catalog_view_cache_dirty) {
+            touch_gesture.dragging=touch_gesture.settling=false;
+            if (touch_gesture.active) touch_gesture.cancelled=true;
+        }
+        refresh_catalog_view_cache(&app);
+        touch_scroll_tick(&touch_gesture,sceKernelGetProcessTimeWide());
         memset(&touch, 0, sizeof(touch));
         if (sceTouchPeek(SCE_TOUCH_PORT_FRONT, &touch, 1) >= 0)
-            pressed |= touch_tap_pressed(&touch, &touch_active, &touch_start_x, &touch_start_y,
-                                         &touch_last_x, &touch_last_y);
+            pressed |= touch_gesture_pressed(&touch, &touch_gesture);
+        else {
+            touch_gesture.dragging=touch_gesture.settling=false;
+            touch_gesture.cancelled=true;
+        }
         if (pressed & SCE_CTRL_START) {
             (void)pause_active_download(&app, true);
             break;

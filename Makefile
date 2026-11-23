@@ -39,6 +39,7 @@ test-vita-lifecycle:
 	python3 tests/test_romm_worker.py
 	python3 tests/test_artwork_worker.py
 	python3 tests/test_settings_navigation.py
+	python3 tests/test_vita_touch_navigation.py
 
 build/test_presentation: src/vita/ui_presentation.c src/vita/ui_presentation.h tests/test_presentation.c
 	@mkdir -p build

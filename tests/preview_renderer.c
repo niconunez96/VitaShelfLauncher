@@ -261,6 +261,68 @@ static void check_carousel_motion(VpUiFrame *frame,VpApp *app,cairo_surface_t *c
     frame->preferences.animated=saved_animated;
 }
 
+static void check_touch_scroll(VpUiFrame *frame,VpApp *app,cairo_surface_t *canvas) {
+    int stride=cairo_image_surface_get_stride(canvas),x,y,changed=0;
+    size_t bytes=(size_t)stride*544;
+    unsigned char *snapshot=malloc(bytes),*current;
+    assert(snapshot);
+    app->active_screen=VP_SCREEN_LIBRARY; app->library_level=VP_LEVEL_ROMS;
+    app->active_view=VP_VIEW_LIST; app->selected_item=0;
+    frame->preferences.animated=false;
+    frame->touch_scrolling=false; frame->list_scroll=0;
+    vp_ui_load_theme("ui_motion_ms=0\nui_wallpaper_alpha=0\n");
+    settle(frame); cairo_surface_flush(canvas);
+    memcpy(snapshot,cairo_image_surface_get_data(canvas),bytes);
+    frame->touch_scrolling=true; frame->list_scroll=2.5f;
+    settle(frame); cairo_surface_flush(canvas);
+    current=cairo_image_surface_get_data(canvas);
+    for (y=148;y<480;y++) for (x=370;x<936;x++)
+        assert(image_pixel(snapshot,stride,x,y)==image_pixel(current,stride,x,y));
+    for (y=166;y<440;y++) for (x=48;x<356;x++)
+        if (image_pixel(snapshot,stride,x,y)!=image_pixel(current,stride,x,y)) changed++;
+    assert(changed>500 && app->selected_item==0);
+    assert(strstr(frame_text,"Resident Evil\n")); /* rows beyond the old page are rendered */
+
+    app->active_view=VP_VIEW_GRID; frame->touch_scrolling=false; frame->grid_scroll=0;
+    settle(frame); cairo_surface_flush(canvas);
+    memcpy(snapshot,cairo_image_surface_get_data(canvas),bytes);
+    frame->touch_scrolling=true; frame->grid_scroll=.5f;
+    settle(frame); cairo_surface_flush(canvas);
+    current=cairo_image_surface_get_data(canvas); changed=0;
+    for (y=0;y<544;y++) for (x=0;x<960;x++) {
+        bool different=image_pixel(snapshot,stride,x,y)!=image_pixel(current,stride,x,y);
+        if (y<148 || y>=480) assert(!different);
+        else if (different) changed++;
+    }
+    assert(changed>500 && app->selected_item==0);
+    /* A selected card in the entering bottom row must still be clipped. */
+    app->selected_item=10; frame->grid_scroll=.25f;
+    settle(frame);
+    app->selected_item=0;
+    frame->grid_scroll=0;
+
+    app->active_view=VP_VIEW_CAROUSEL; frame->carousel_base=5; frame->touch_scroll=5.25f;
+    settle(frame);
+    assert(fabsf(vp_ui_scroll_origin(VP_LEVEL_ROMS)-5.25f)<.001f && app->selected_item==0);
+    /* Signed preview bases must paint identically after handing back a wrapped selection. */
+    for (int direction=0;direction<2;direction++) {
+        app->selected_item=direction?11:0;
+        frame->touch_scrolling=true;
+        frame->carousel_base=direction?-1:12;
+        frame->touch_scroll=(float)frame->carousel_base;
+        settle(frame); cairo_surface_flush(canvas);
+        memcpy(snapshot,cairo_image_surface_get_data(canvas),bytes);
+        frame->touch_scrolling=false;
+        settle(frame); cairo_surface_flush(canvas);
+        current=cairo_image_surface_get_data(canvas);
+        for (y=148;y<410;y++) for (x=0;x<960;x++)
+            assert(image_pixel(snapshot,stride,x,y)==image_pixel(current,stride,x,y));
+    }
+    app->selected_item=0;
+    frame->touch_scrolling=false; frame->list_scroll=0;
+    free(snapshot);
+}
+
 int main(int argc,char **argv) {
     static VpApp app,before;
     static VpDownloadQueue queue;
@@ -325,6 +387,7 @@ int main(int argc,char **argv) {
         app.active_screen=VP_SCREEN_LIBRARY; app.library_level=VP_LEVEL_PLATFORMS; app.selected_platform=5; app.selected_item=0;
         frame.group_count=12; frame.visible_count=12; frame.settings_detail=false; frame.settings_integration_open=false; queue.count=6;
         frame.romm_catalog_available=true;
+        frame.grid_scroll=0;
         frame.settings_integration=VP_INTEGRATION_ROMM;
         frame.steamgrid_syncing=false;
         if (c>=1 && c<=3) { app.library_level=VP_LEVEL_ROMS; app.active_view=c==1?VP_VIEW_CAROUSEL:(c==2?VP_VIEW_LIST:VP_VIEW_GRID); }
@@ -337,7 +400,7 @@ int main(int argc,char **argv) {
         if (c==11) frame.romm_catalog_available=false;
         if (c==12) app.active_screen=VP_SCREEN_STORES;
         if (c==13) frame.group_count=0;
-        if (c==14) { app.library_level=VP_LEVEL_ROMS; app.active_view=VP_VIEW_GRID; app.selected_item=11; }
+        if (c==14) { app.library_level=VP_LEVEL_ROMS; app.active_view=VP_VIEW_GRID; app.selected_item=11; frame.grid_scroll=1; }
         if (c>=15) app.selected_platform=c==15?0:(c==16?2:11);
         if (c>=18 && c<=21) {
             app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=true;
@@ -362,7 +425,8 @@ int main(int argc,char **argv) {
         }
         (void)snprintf(app.active_platform,sizeof(app.active_platform),"psx");
         frame.romm_state=c==10?VP_ROMM_UNCONFIGURED:VP_ROMM_CONNECTED;
-        for (i=0;i<10;i++) frame.covers[i]=covers[i];
+        for (i=0;i<VP_UI_GRID_WINDOW;i++) frame.covers[i]=covers[i%10];
+        frame.selected_cover=covers[app.selected_item%10];
         if (app.active_view==VP_VIEW_CAROUSEL)
             for (i=0;i<2*VP_UI_CAROUSEL_REACH+1;i++) frame.covers[i]=covers[i%10];
         before=app; settle(&frame); assert(!memcmp(&app,&before,sizeof(app)));
@@ -410,6 +474,7 @@ int main(int argc,char **argv) {
         if (argc>1) { char path[1024]; (void)snprintf(path,sizeof(path),"%s/%s.png",argv[1],cases[c]); assert(!cairo_surface_write_to_png(canvas,path)); }
     }
     check_carousel_motion(&frame,&app,canvas,argc>1?argv[1]:NULL);
+    check_touch_scroll(&frame,&app,canvas);
     check_console_material(&frame,&app,canvas,argc>1?argv[1]:NULL);
     vp_ui_shutdown();
     unavailable_asset="console_focus.png";

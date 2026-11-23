@@ -54,6 +54,9 @@ static void test_console_motion(void) {
     assert(vp_ui_console_motion_touch(&m,100,300)==-1);
     vp_ui_console_motion_update(&m,0,VP_MAX_PLATFORMS+1,2200000,180);
     assert(m.count==0);
+    vp_ui_console_motion_update(&m,4,12,2300000,180);
+    vp_ui_console_motion_drag(&m,3.5f,2310000);
+    assert(fabsf(m.scroll-3.5f)<.001f && fabsf(m.from_scroll-3.5f)<.001f);
 }
 
 static void test_carousel_motion(void) {
@@ -227,6 +230,53 @@ int main(void) {
     assert(vp_ui_console_start(0,12)==0 && vp_ui_console_start(11,12)==6);
     assert(vp_ui_console_start(3,4)==0);
     assert(vp_ui_console_start(0,0)==0);
+    assert(vp_ui_scroll_clamp(-5,20,1)==0 && vp_ui_scroll_clamp(25,20,1)==19);
+    assert(vp_ui_wrap_index(-1,20)==19 && vp_ui_wrap_index(20,20)==0);
+    assert(vp_ui_wrap_index(-45,20)==15 && vp_ui_wrap_index(65,20)==5);
+    assert(vp_ui_wrap_index(-9,1)==0 && vp_ui_wrap_index(9,0)==0);
+    {
+        VpUiCarouselMotion m={0};
+        VpUiRect before,after;
+        vp_ui_carousel_motion_update(&m,0,20,1000000,0);
+        vp_ui_carousel_motion_drag(&m,60.25f,1100000);
+        assert(m.scroll==60.25f);
+        before=vp_ui_carousel_motion_tile(&m,60);
+        vp_ui_carousel_motion_rebase(&m);
+        after=vp_ui_carousel_motion_tile(&m,0);
+        assert(m.scroll==.25f && !memcmp(&before,&after,sizeof(before)));
+        vp_ui_carousel_motion_update(&m,19,20,1200000,0);
+        vp_ui_carousel_motion_drag(&m,-.75f,1300000);
+        before=vp_ui_carousel_motion_tile(&m,-1);
+        vp_ui_carousel_motion_rebase(&m);
+        after=vp_ui_carousel_motion_tile(&m,19);
+        assert(m.scroll==19.25f && !memcmp(&before,&after,sizeof(before)));
+    }
+    assert(vp_ui_scroll_clamp(4,3,VP_UI_LIST_PAGE)==0);
+    assert(vp_ui_list_start(7,20,2)==3 && vp_ui_list_start(1,20,5)==1);
+    assert(vp_ui_scrolled_list_row(5,4.5f).y==197);
+    assert(vp_ui_grid_rows(0)==0 && vp_ui_grid_rows(5)==1 && vp_ui_grid_rows(11)==3);
+    assert(vp_ui_grid_start(11,12,0)==1 && vp_ui_grid_start(0,12,1)==0);
+    assert(vp_ui_grid_start(255,256,0)==50 && vp_ui_grid_start(4,5,3)==0);
+    {
+        VpUiRect r=vp_ui_scrolled_grid_tile(12,1.5f);
+        assert(r.x==400 && r.y==238 && r.w==160 && r.h==146);
+        for (size_t slot=0;slot<VP_UI_GRID_PAGE;slot++) {
+            VpUiRect scrolled=vp_ui_scrolled_grid_tile(slot+10,2),original=vp_ui_tile(slot);
+            assert(!memcmp(&scrolled,&original,sizeof(original)));
+        }
+    }
+    {
+        VpUiCarouselMotion m={0};
+        VpUiRect before,after;
+        vp_ui_carousel_motion_update(&m,3,10,1000000,180);
+        before=vp_ui_carousel_motion_tile(&m,3);
+        assert(before.w==220 && before.h==246);
+        vp_ui_carousel_motion_drag(&m,2.5f,1010000);
+        after=vp_ui_carousel_motion_tile(&m,3);
+        assert(m.scroll==2.5f && after.x>before.x && after.w<before.w);
+        vp_ui_carousel_motion_update(&m,4,10,1020000,180);
+        assert(m.from_scroll==2.5f);
+    }
     for (i=1;i<=25;i++) {
         size_t selected;
         for (selected=0;selected<i;selected++) {
