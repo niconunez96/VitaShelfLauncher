@@ -749,7 +749,10 @@ static void render_library_modal(const VpUiFrame *f) {
     const VpUiRect card=vp_ui_library_panel(f->library_modal_progress);
     const VpItem *item=f->visible_count && f->app->selected_item<f->app->catalog.count?
         &f->app->catalog.items[f->app->selected_item]:NULL;
-    const char *title=f->library_modal==VP_LIBRARY_MODAL_ACTIONS?"Acciones del juego":"Filtros de biblioteca";
+    bool arcade=item!=NULL && vp_platform_is_arcade(item->platform);
+    const char *title=f->library_modal==VP_LIBRARY_MODAL_ACTIONS?"Acciones del juego":
+        f->library_modal==VP_LIBRARY_MODAL_CORES?"Núcleo arcade":"Filtros de biblioteca";
+    const char *close_label=f->library_modal==VP_LIBRARY_MODAL_CORES?"Volver":"Cerrar";
     const unsigned int primary=C(243,247,255,255),secondary=C(185,200,226,255);
     const int hint_y=card.y+card.h-38;
     int rows;
@@ -758,15 +761,22 @@ static void render_library_modal(const VpUiFrame *f) {
     round_rect(card.x,card.y,card.w,card.h,20,C(12,19,40,255));
     /* Text coordinates are baselines: leave room above the 30px title glyphs. */
     text(f,VP_TYPE_PAGE_TITLE,card.x+24,card.y+54,card.w-48,primary,title);
-    rows=f->library_modal==VP_LIBRARY_MODAL_ACTIONS?VP_LIBRARY_ACTIONS_ROWS:VP_LIBRARY_FILTERS_ROWS;
+    rows=f->library_modal_rows>0?f->library_modal_rows:
+        f->library_modal==VP_LIBRARY_MODAL_ACTIONS?VP_LIBRARY_ACTIONS_ROWS:VP_LIBRARY_FILTERS_ROWS;
     for (index=0;index<rows;index++) {
-        VpUiRect r=vp_ui_library_panel_row((size_t)index,f->library_modal_progress);
+        VpUiRect r=f->library_modal==VP_LIBRARY_MODAL_CORES
+            ? vp_ui_library_panel_core_row((size_t)index,f->library_modal_progress)
+            : vp_ui_library_panel_row((size_t)index,f->library_modal_progress);
         bool selected=(size_t)index==f->library_modal_row;
         const char *label;
         if (f->library_modal==VP_LIBRARY_MODAL_ACTIONS) {
             if (index==0) label=item && item->favorite?actions[0]:actions[1];
             else if (index==1) label=item && item->hidden?actions[3]:actions[2];
+            else if (index==2 && arcade) label="Núcleo arcade…";
             else label=actions[4];
+        } else if (f->library_modal==VP_LIBRARY_MODAL_CORES) {
+            const VpArcadeCore *core=vp_arcade_core((size_t)index);
+            label=core!=NULL?core->label:"Automático";
         } else {
             if (index==0) label=f->app->library_filters.show_hidden?filters[0]:filters[1];
             else if (index==1) label=f->app->library_filters.downloaded_only?filters[2]:filters[3];
@@ -783,7 +793,7 @@ static void render_library_modal(const VpUiFrame *f) {
     button(0,card.x+168,hint_y);
     text(f,VP_TYPE_FOOTER,card.x+186,hint_y+5,88,secondary,"Activar");
     button(1,card.x+306,hint_y);
-    text(f,VP_TYPE_FOOTER,card.x+324,hint_y+5,92,secondary,"Cerrar");
+    text(f,VP_TYPE_FOOTER,card.x+324,hint_y+5,92,secondary,close_label);
 }
 
 /* One small atlas preserves smooth colored outlines at the native footer size. */

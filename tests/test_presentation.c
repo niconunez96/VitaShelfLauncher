@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Keep this target independent of the core translation units. */
+static size_t presentation_core_count(void) { return 10; }
+
 static void test_sync_feedback(void) {
     char text[128];
     VpUiSyncStatus status = {.state=VP_SYNC_RUNNING, .operation=VP_SYNC_METADATA,
@@ -337,17 +340,31 @@ int main(void) {
             float progress=(float)step/4;
             VpUiRect panel=vp_ui_library_panel(progress);
             assert(panel.x<=closed.x && panel.x>=open.x);
-            for (size_t row=0;row<VP_LIBRARY_ACTIONS_ROWS;row++) {
+            for (size_t row=0;row<VP_LIBRARY_ACTIONS_ARCADE_ROWS;row++) {
                 VpUiRect r=vp_ui_library_panel_row(row,progress);
                 assert(r.x>=panel.x+24 && r.x+r.w<=panel.x+panel.w-24);
                 assert(r.y>=panel.y+90 && r.y+r.h<panel.y+panel.h-70);
-                assert(vp_ui_touch_library_panel_row(progress,r.x,r.y)==(int)row);
-                assert(vp_ui_touch_library_panel_row(progress,r.x+r.w-1,r.y+r.h-1)==(int)row);
-                assert(vp_ui_touch_library_panel_row(progress,r.x+r.w,r.y)==-1);
-                assert(vp_ui_touch_library_panel_row(progress,r.x,r.y+r.h)==-1);
+                assert(vp_ui_touch_library_panel_row(progress,r.x,r.y,VP_LIBRARY_MODAL_ACTIONS,
+                                                     VP_LIBRARY_ACTIONS_ARCADE_ROWS)==(int)row);
+                assert(vp_ui_touch_library_panel_row(progress,r.x+r.w-1,r.y+r.h-1,VP_LIBRARY_MODAL_ACTIONS,
+                                                     VP_LIBRARY_ACTIONS_ARCADE_ROWS)==(int)row);
+                assert(vp_ui_touch_library_panel_row(progress,r.x+r.w,r.y,VP_LIBRARY_MODAL_ACTIONS,
+                                                     VP_LIBRARY_ACTIONS_ARCADE_ROWS)==-1);
+                assert(vp_ui_touch_library_panel_row(progress,r.x,r.y+r.h,VP_LIBRARY_MODAL_ACTIONS,
+                                                     VP_LIBRARY_ACTIONS_ARCADE_ROWS)==-1);
             }
+            assert(vp_ui_touch_library_panel_row(progress,vp_ui_library_panel_row(3,progress).x,
+                                                 vp_ui_library_panel_row(3,progress).y,
+                                                 VP_LIBRARY_MODAL_ACTIONS,VP_LIBRARY_ACTIONS_ROWS)==-1);
         }
-        assert(vp_ui_touch_library_panel_row(1.f,50,160)==-1);
+        assert(vp_ui_touch_library_panel_row(1.f,50,160,VP_LIBRARY_MODAL_ACTIONS,
+                                             VP_LIBRARY_ACTIONS_ARCADE_ROWS)==-1);
+        for (size_t row=0;row<presentation_core_count();row++) {
+            VpUiRect r=vp_ui_library_panel_core_row(row,1.f);
+            assert(r.y>=open.y+64 && r.y+r.h<open.y+open.h-30);
+            assert(vp_ui_touch_library_panel_row(1.f,r.x,r.y,VP_LIBRARY_MODAL_CORES,
+                                                 (int)presentation_core_count())==(int)row);
+        }
     }
     assert(vp_ui_touch_back(613,513));
     assert(!vp_ui_touch_back(599,513));

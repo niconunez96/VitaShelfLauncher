@@ -782,16 +782,16 @@ static const VpDefaultLaunchProfile vp_default_launch_profiles[] = {
 
 /* Cores bundled by RetroArch Vita. The set/core version match is a user decision. */
 static const VpArcadeCore vp_arcade_cores[] = {
-    {"auto", ""},
-    {"fbneo", VP_ARCADE_DEFAULT_CORE},
-    {"fbalpha", "app0:/fbalpha_libretro.self"},
-    {"fbalpha2012", "app0:/fbalpha2012_libretro.self"},
-    {"fbalpha2012-cps1", "app0:/fbalpha2012_cps1_libretro.self"},
-    {"fbalpha2012-cps2", "app0:/fbalpha2012_cps2_libretro.self"},
-    {"fbalpha2012-neogeo", "app0:/fbalpha2012_neo_libretro.self"},
-    {"mame2000", "app0:/mame2000_libretro.self"},
-    {"mame2003", "app0:/mame2003_libretro.self"},
-    {"mame2003plus", "app0:/mame2003plus_libretro.self"}
+    {"auto", "Automático", ""},
+    {"fbneo", "FB Neo (predeterminado)", VP_ARCADE_DEFAULT_CORE},
+    {"fbalpha", "FB Alpha", "app0:/fbalpha_libretro.self"},
+    {"fbalpha2012", "FBA 2012", "app0:/fbalpha2012_libretro.self"},
+    {"fbalpha2012-cps1", "FBA 2012 CPS-1", "app0:/fbalpha2012_cps1_libretro.self"},
+    {"fbalpha2012-cps2", "FBA 2012 CPS-2", "app0:/fbalpha2012_cps2_libretro.self"},
+    {"fbalpha2012-neogeo", "FBA 2012 Neo Geo", "app0:/fbalpha2012_neogeo_libretro.self"},
+    {"mame2000", "MAME 2000", "app0:/mame2000_libretro.self"},
+    {"mame2003", "MAME 2003", "app0:/mame2003_libretro.self"},
+    {"mame2003plus", "MAME 2003 Plus", "app0:/mame2003plus_libretro.self"}
 };
 
 size_t vp_arcade_core_count(void) {

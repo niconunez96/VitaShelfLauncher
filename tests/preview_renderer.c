@@ -316,6 +316,7 @@ static void check_favorites_icon(VpUiFrame *frame,VpApp *app,cairo_surface_t *ca
 }
 
 static void check_library_controls(VpUiFrame *frame,VpApp *app,cairo_surface_t *canvas,const char *directory) {
+    char saved_platform[VP_TEXT];
     app->active_screen=VP_SCREEN_LIBRARY; app->library_level=VP_LEVEL_PLATFORMS;
     frame->library_modal=VP_LIBRARY_MODAL_NONE;
     settle(frame);
@@ -327,17 +328,27 @@ static void check_library_controls(VpUiFrame *frame,VpApp *app,cairo_surface_t *
     frame->library_modal=VP_LIBRARY_MODAL_NONE;
     app->library_level=VP_LEVEL_ROMS;
     app->active_view=VP_VIEW_GRID; app->selected_item=0;
+    strcpy(saved_platform,app->catalog.items[app->selected_item].platform);
+    strcpy(app->catalog.items[app->selected_item].platform,"arcade");
     frame->library_modal=VP_LIBRARY_MODAL_NONE;
     settle(frame);
     assert(strstr(frame_text,"SELECT\nFiltros\n"));
     assert(strstr(frame_text,"Vista\n")<strstr(frame_text,"Opciones\n"));
     assert(strstr(frame_text,"Opciones\n")<strstr(frame_text,"SELECT\n"));
-    for (int modal=VP_LIBRARY_MODAL_ACTIONS;modal<=VP_LIBRARY_MODAL_FILTERS;modal++) {
+    for (int modal=VP_LIBRARY_MODAL_ACTIONS;modal<=VP_LIBRARY_MODAL_CORES;modal++) {
         VpUiRect panel=vp_ui_library_panel(1.f);
         frame->library_modal=(VpLibraryModal)modal; frame->library_modal_progress=1.f;
+        frame->library_modal_rows=modal==VP_LIBRARY_MODAL_ACTIONS?VP_LIBRARY_ACTIONS_ARCADE_ROWS:
+            modal==VP_LIBRARY_MODAL_CORES?(int)vp_arcade_core_count():VP_LIBRARY_FILTERS_ROWS;
         checking_panel=true; settle(frame); checking_panel=false;
-        assert(strstr(frame_text,"Elegir\n") && strstr(frame_text,"Activar\n") && strstr(frame_text,"Cerrar\n"));
+        assert(strstr(frame_text,"Elegir\n") && strstr(frame_text,"Activar\n"));
+        assert(strstr(frame_text,modal==VP_LIBRARY_MODAL_CORES?"Volver\n":"Cerrar\n"));
         assert(!strstr(frame_text,"Arriba / Abajo"));
+        if (modal==VP_LIBRARY_MODAL_ACTIONS)
+            assert(strstr(frame_text,"Núcleo arcade…\n"));
+        if (modal==VP_LIBRARY_MODAL_CORES)
+            assert(strstr(frame_text,"Núcleo arcade\n") && strstr(frame_text,"Automático\n") &&
+                   strstr(frame_text,"MAME 2000\n") && strstr(frame_text,"MAME 2003 Plus\n"));
         bool cross=false,circle=false;
         for (size_t i=0;i<button_draw_count;i++) {
             if (button_draws[i].y>=panel.y+panel.h-60 && button_draws[i].y<panel.y+panel.h-12) {
@@ -348,10 +359,14 @@ static void check_library_controls(VpUiFrame *frame,VpApp *app,cairo_surface_t *
         assert(cross && circle);
         if (directory) {
             char path[1024];
-            (void)snprintf(path,sizeof(path),"%s/library-%s.png",directory,modal==VP_LIBRARY_MODAL_ACTIONS?"actions":"filters");
+            const char *name=modal==VP_LIBRARY_MODAL_ACTIONS?"library-arcade-actions":
+                modal==VP_LIBRARY_MODAL_CORES?"library-arcade-cores":"library-filters";
+            (void)snprintf(path,sizeof(path),"%s/%s.png",directory,name);
             assert(!cairo_surface_write_to_png(canvas,path));
         }
     }
+    strcpy(app->catalog.items[app->selected_item].platform,saved_platform);
+    frame->library_modal_rows=0;
     frame->library_modal=VP_LIBRARY_MODAL_NONE;
 }
 

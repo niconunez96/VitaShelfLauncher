@@ -15,9 +15,11 @@ typedef struct { float x, y, scale; } VpUiBackdropTransform;
 typedef enum {
     VP_LIBRARY_MODAL_NONE,
     VP_LIBRARY_MODAL_ACTIONS,
-    VP_LIBRARY_MODAL_FILTERS
+    VP_LIBRARY_MODAL_FILTERS,
+    VP_LIBRARY_MODAL_CORES
 } VpLibraryModal;
 #define VP_LIBRARY_ACTIONS_ROWS 3
+#define VP_LIBRARY_ACTIONS_ARCADE_ROWS 4
 #define VP_LIBRARY_FILTERS_ROWS 3
 #define VP_UI_WALLPAPER_COUNT 4
 #define VP_UI_TEXT_COLOR_COUNT 4
@@ -104,7 +106,9 @@ VpUiRect vp_ui_settings_row(size_t slot);
 VpUiRect vp_ui_settings_content_card(void);
 VpUiRect vp_ui_library_panel(float progress);
 VpUiRect vp_ui_library_panel_row(size_t slot, float progress);
-int vp_ui_touch_library_panel_row(float progress, int x, int y);
+VpUiRect vp_ui_library_panel_core_row(size_t slot, float progress);
+int vp_ui_touch_library_panel_row(float progress, int x, int y,
+                                  VpLibraryModal modal, int rows);
 VpUiRect vp_ui_wallpaper_tile(size_t slot);
 VpUiRect vp_ui_wallpaper_motion_row(void);
 VpUiRect vp_ui_text_color_row(void);

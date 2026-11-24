@@ -104,8 +104,14 @@ static unsigned long long library_modal_opened_at;
 static float library_modal_progress(void);
 
 static int library_modal_rows(void) {
-    return library_modal==VP_LIBRARY_MODAL_NONE?0:
-        (library_modal==VP_LIBRARY_MODAL_ACTIONS?VP_LIBRARY_ACTIONS_ROWS:VP_LIBRARY_FILTERS_ROWS);
+    if (library_modal == VP_LIBRARY_MODAL_NONE) return 0;
+    if (library_modal == VP_LIBRARY_MODAL_ACTIONS) {
+        return app.selected_item < app.catalog.count &&
+               vp_platform_is_arcade(app.catalog.items[app.selected_item].platform)
+                   ? VP_LIBRARY_ACTIONS_ARCADE_ROWS : VP_LIBRARY_ACTIONS_ROWS;
+    }
+    if (library_modal == VP_LIBRARY_MODAL_CORES) return (int)vp_arcade_core_count();
+    return VP_LIBRARY_FILTERS_ROWS;
 }
 
 typedef enum {
@@ -2091,8 +2097,14 @@ static void activate_selected(VpApp *app) {
             else sceKernelExitProcess(0);
             return;
         }
-        const VpLaunchProfile *profile = vp_launch_config_find(&launch_config, item->platform);
+        char rom_key[VP_TEXT];
+        const VpLaunchProfile *profile = NULL;
         char uri[VP_LAUNCH_URI];
+        if (vp_rom_launch_key(item, rom_key, sizeof(rom_key)))
+            profile = vp_launch_config_find(&launch_config, rom_key);
+        if (profile == NULL) profile = vp_launch_config_find(&launch_config, item->platform);
+        if (profile == NULL && vp_platform_is_arcade(item->platform))
+            profile = vp_launch_config_find(&launch_config, "arcade");
         if (profile == NULL) {
             (void)snprintf(app->notice, sizeof(app->notice),
                            "Sin emulador para %.40s; agrega launch_%.40s=<titleid>[:<core>] en config.ini",
@@ -2284,6 +2296,7 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
     }
     frame->downloads = &download_queue; frame->download_selection = download_selection;
     frame->library_modal = library_modal; frame->library_modal_row = library_modal_row;
+    frame->library_modal_rows = library_modal_rows();
     frame->library_modal_progress = library_modal_progress();
     frame->settings_section = settings_section; frame->settings_field = settings_field;
     frame->preferences = ui_preferences;
@@ -2345,9 +2358,26 @@ static void close_library_modal(void) {
     library_modal_opened_at = 0;
 }
 
+static size_t arcade_core_index(const VpItem *item) {
+    char key[VP_TEXT];
+    const VpLaunchProfile *profile;
+    const char *path;
+    size_t index;
+    if (item == NULL || !vp_rom_launch_key(item, key, sizeof(key))) return 0;
+    profile = vp_launch_config_find(&launch_config, key);
+    path = profile != NULL ? profile->core : vp_platform_default_core(item->platform);
+    if (path == NULL || path[0] == '\0') return 0;
+    for (index = 0; index < vp_arcade_core_count(); index++) {
+        const VpArcadeCore *core = vp_arcade_core(index);
+        if (core != NULL && strcmp(core->core, path) == 0) return index;
+    }
+    return 0;
+}
+
 static void open_library_modal(VpLibraryModal modal) {
     library_modal = modal;
-    library_modal_row = 0;
+    library_modal_row = modal == VP_LIBRARY_MODAL_CORES && app.selected_item < app.catalog.count
+                            ? arcade_core_index(&app.catalog.items[app.selected_item]) : 0;
     library_modal_opened_at = sceKernelGetProcessTimeWide();
 }
 
@@ -2374,8 +2404,18 @@ static void handle_library_modal_input(unsigned int pressed) {
         library_modal_row = (library_modal_row + 1) % (size_t)rows;
         vp_ui_audio_play(VP_UI_SOUND_NAVIGATION);
     }
-    if ((pressed & SCE_CTRL_CIRCLE) ||
-        (library_modal == VP_LIBRARY_MODAL_ACTIONS && (pressed & SCE_CTRL_SQUARE)) ||
+    if (pressed & SCE_CTRL_CIRCLE) {
+        if (library_modal == VP_LIBRARY_MODAL_CORES) {
+            open_library_modal(VP_LIBRARY_MODAL_ACTIONS);
+            library_modal_row = 2;
+            vp_ui_audio_play(VP_UI_SOUND_BACK);
+            return;
+        }
+        close_library_modal();
+        vp_ui_audio_play(VP_UI_SOUND_BACK);
+        return;
+    }
+    if ((library_modal == VP_LIBRARY_MODAL_ACTIONS && (pressed & SCE_CTRL_SQUARE)) ||
         (library_modal == VP_LIBRARY_MODAL_FILTERS && (pressed & SCE_CTRL_SELECT))) {
         close_library_modal();
         vp_ui_audio_play(VP_UI_SOUND_BACK);
@@ -2392,9 +2432,41 @@ static void handle_library_modal_input(unsigned int pressed) {
         }
         if (library_modal_row == 0) vp_item_toggle_favorite(item);
         else if (library_modal_row == 1) vp_item_toggle_hidden(item);
+        else if (library_modal_row == 2 && vp_platform_is_arcade(item->platform)) {
+            open_library_modal(VP_LIBRARY_MODAL_CORES);
+            vp_ui_audio_play(VP_UI_SOUND_ENTER);
+            return;
+        }
         persist_library_preferences();
         catalog_view_cache_dirty = true;
         refresh_catalog_view_cache(&app);
+    } else if (library_modal == VP_LIBRARY_MODAL_CORES) {
+        VpItem *item = app.selected_item < app.catalog.count ?
+                        &app.catalog.items[app.selected_item] : NULL;
+        const VpArcadeCore *core = vp_arcade_core(library_modal_row);
+        char key[VP_TEXT];
+        if (visible_count_cache == 0 || item == NULL || core == NULL ||
+            !vp_rom_launch_key(item, key, sizeof(key))) {
+            close_library_modal();
+            return;
+        }
+        if (core->core[0] == '\0') {
+            (void)vp_launch_config_remove(&launch_config, key);
+            if (!save_romm_config())
+                show_notification(&app, "No se pudo guardar el núcleo arcade");
+            else
+                show_notification(&app, "Núcleo arcade: automático");
+        } else {
+            char value[VP_TEXT];
+            (void)snprintf(value, sizeof(value), "RETROVITA:%s", core->core);
+            if (vp_launch_config_set(&launch_config, key, value) && save_romm_config())
+                show_notification(&app, "Núcleo arcade: %s", core->label);
+            else
+                show_notification(&app, "No se pudo guardar el núcleo arcade");
+        }
+        close_library_modal();
+        vp_ui_audio_play(VP_UI_SOUND_ENTER);
+        return;
     } else {
         if (library_modal_row == 0) app.library_filters.show_hidden = !app.library_filters.show_hidden;
         else if (library_modal_row == 1) app.library_filters.downloaded_only = !app.library_filters.downloaded_only;
@@ -2413,7 +2485,8 @@ static unsigned int touch_navigation_pressed(int x, int y) {
         float progress = library_modal_progress();
         VpUiRect panel = vp_ui_library_panel(progress);
         int hint_y = panel.y + panel.h - 38;
-        slot = vp_ui_touch_library_panel_row(progress, x, y);
+        slot = vp_ui_touch_library_panel_row(progress, x, y, library_modal,
+                                             library_modal_rows());
         if (slot >= 0) {
             library_modal_row = (size_t)slot;
             return SCE_CTRL_CROSS;

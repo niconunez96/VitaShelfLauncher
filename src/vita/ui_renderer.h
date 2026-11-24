@@ -20,6 +20,7 @@ typedef struct {
     size_t download_selection;
     VpLibraryModal library_modal;
     size_t library_modal_row;
+    int library_modal_rows;
     float library_modal_progress;
     int settings_section, settings_field;
     bool settings_detail, settings_integration_open;

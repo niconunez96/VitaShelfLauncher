@@ -35,6 +35,8 @@ static size_t platform_group_count, visible_count_cache, visible_indexes[VP_MAX_
 static VpLibraryModal library_modal;
 static size_t library_modal_row;
 static unsigned long long library_modal_opened_at;
+static VpLaunchConfig launch_config;
+static int config_saves;
 enum { SCE_CTRL_UP=1, SCE_CTRL_DOWN=2, SCE_CTRL_CROSS=4, SCE_CTRL_CIRCLE=8,
  SCE_CTRL_SQUARE=16,SCE_CTRL_TRIANGLE=32,SCE_CTRL_SELECT=256,
  VP_UI_SOUND_NAVIGATION,VP_UI_SOUND_BACK,VP_UI_SOUND_ENTER,VP_UI_SOUND_DOWNLOAD_COMPLETE };
@@ -47,7 +49,7 @@ static int sceIoRename(const char *a,const char *b) {
 static unsigned long long sceKernelGetProcessTimeWide(void) { return 1; }
 static void show_notification(VpApp *v,const char *s,...) { (void)v;(void)s; }
 static void vp_ui_audio_play(int s) { (void)s; }
-static bool save_romm_config(void) { return true; }
+static bool save_romm_config(void) { config_saves++; return true; }
 static bool start_next_download(void) { return false; }
 static bool settings_ime_active;
 static size_t list_start,grid_start;
@@ -69,13 +71,14 @@ static void seed(void) {
     app.catalog.items[0].source=VP_SOURCE_LOCAL;
     app.catalog.items[0].installed=true;
     strcpy(app.catalog.items[1].id,"romm:7");
+    strcpy(app.catalog.items[1].remote_id,"7");
     strcpy(app.catalog.items[1].platform,"snes");
     strcpy(app.catalog.items[1].title,"Zelda");
     strcpy(app.catalog.items[1].launch_target,"downloads/zelda.sfc");
     app.catalog.items[1].source=VP_SOURCE_ROMM;
 }
 int main(int argc,char **argv) {
-    assert(argc==2); seed();
+    assert(argc==2); seed(); vp_launch_config_init(&launch_config);
     if (!strcmp(argv[1],"roundtrip")) {
         app.catalog.items[0].favorite=true; app.catalog.items[1].hidden=true;
         app.library_filters=(VpLibraryFilters){true,true}; assert(save_library_preferences(&app));
@@ -132,6 +135,38 @@ int main(int argc,char **argv) {
         shortcuts(SCE_CTRL_SQUARE);
         if (library_modal!=VP_LIBRARY_MODAL_NONE) handle_library_modal_input(SCE_CTRL_CROSS);
         printf("unselected-local-favorite=%d\n",app.catalog.items[0].favorite);
+    } else if (!strcmp(argv[1],"arcade-cores")) {
+        size_t index; int before; const VpLaunchProfile *profile;
+        app.library_level=VP_LEVEL_ROMS; strcpy(app.active_platform,"arcade");
+        strcpy(app.catalog.items[1].platform,"arcade"); strcpy(app.catalog.items[1].fs_name,"tmnt2.zip");
+        app.selected_item=1; refresh_catalog_view_cache(&app); assert(visible_count_cache==1);
+        library_modal=VP_LIBRARY_MODAL_ACTIONS; library_modal_row=2;
+        assert(library_modal_rows()==4);
+        handle_library_modal_input(SCE_CTRL_CROSS);
+        assert(library_modal==VP_LIBRARY_MODAL_CORES && library_modal_row==1);
+        handle_library_modal_input(SCE_CTRL_CIRCLE);
+        assert(library_modal==VP_LIBRARY_MODAL_ACTIONS && library_modal_row==2);
+        handle_library_modal_input(SCE_CTRL_CROSS);
+        assert(library_modal==VP_LIBRARY_MODAL_CORES && library_modal_row==1);
+        for (index=0; index<vp_arcade_core_count(); index++) {
+            const VpArcadeCore *core=vp_arcade_core(index);
+            if (core && !strcmp(core->id,"mame2000")) break;
+        }
+        assert(index<vp_arcade_core_count()); before=config_saves; library_modal_row=index;
+        handle_library_modal_input(SCE_CTRL_CROSS);
+        assert(library_modal==VP_LIBRARY_MODAL_NONE && config_saves==before+1);
+        profile=vp_launch_config_find(&launch_config,"rom.7");
+        assert(profile && !strcmp(profile->core,"app0:/mame2000_libretro.self"));
+        library_modal=VP_LIBRARY_MODAL_ACTIONS; library_modal_row=2;
+        handle_library_modal_input(SCE_CTRL_CROSS);
+        assert(library_modal==VP_LIBRARY_MODAL_CORES && library_modal_row==index);
+        library_modal_row=0; before=config_saves;
+        handle_library_modal_input(SCE_CTRL_CROSS);
+        assert(library_modal==VP_LIBRARY_MODAL_NONE && config_saves==before+1);
+        assert(vp_launch_config_find(&launch_config,"rom.7")==NULL);
+        strcpy(app.catalog.items[1].platform,"snes"); library_modal=VP_LIBRARY_MODAL_ACTIONS;
+        assert(library_modal_rows()==3);
+        puts("arcade-cores: PASS");
     } else if (!strcmp(argv[1],"download")) {
         app.library_filters.downloaded_only=true; refresh_catalog_view_cache(&app);
         assert(platform_group_count==2); complete_download(); refresh_catalog_view_cache(&app);
@@ -173,7 +208,8 @@ class LibraryStateTests(unittest.TestCase):
             "static int library_modal_rows(", "static bool write_library_preference_line(",
             "static bool save_library_preferences(", "static bool load_library_preferences(",
             "static void refresh_catalog_view_cache(", "static void close_library_modal(",
-            "static void open_library_modal(", "static void persist_library_preferences(",
+            "static size_t arcade_core_index(", "static void open_library_modal(",
+            "static void persist_library_preferences(",
             "static void handle_library_modal_input("))
         start = SOURCE.index("        VpItem *completed = vp_catalog_find(&app->catalog, item.id);")
         end = SOURCE.index("    } else if (kind == VP_JOB_INSTALL_HOMEBREW)", start)
@@ -217,6 +253,9 @@ class LibraryStateTests(unittest.TestCase):
 
     def test_empty_collection_cannot_edit_another_game(self):
         self.assertEqual(self.run_case("empty-actions"), "unselected-local-favorite=0\n")
+
+    def test_arcade_core_picker_persists_and_clears_override(self):
+        self.assertEqual(self.run_case("arcade-cores"), "arcade-cores: PASS\n")
 
     def test_download_completion_updates_filters(self):
         self.assertEqual(self.run_case("download"), "groups=3 installed=1\n")

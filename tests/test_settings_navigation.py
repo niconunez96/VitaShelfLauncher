@@ -117,7 +117,9 @@ int main(void) {
     assert(file);
     fputs("romm_url=http://127.0.0.1:1\nromm_token=test-fixture\n"
           "image_proxy_url=http://127.0.0.1:2/image\nhomebrew_catalog=http://127.0.0.1:3/catalog\n"
-          "steamgriddb_api_key=steamgrid-fixture\nactive_theme=default\nactive_view=list\nlaunch_psx=RETROVITA:pcsx_rearmed\n",file);
+           "steamgriddb_api_key=steamgrid-fixture\nactive_theme=default\nactive_view=list\nlaunch_psx=RETROVITA:pcsx_rearmed\n"
+           "launch_rom.42=RETROVITA:app0:/mame2000_libretro.self\n",file);
+
     assert(!fclose(file));
     vp_launch_config_init(&launch_config);
     load_providers(&app);
@@ -142,12 +144,16 @@ int main(void) {
     assert(!strcmp(homebrew_config.catalog_url,"http://127.0.0.1:3/catalog"));
     const VpLaunchProfile *profile=vp_launch_config_find(&launch_config,"psx");
     assert(profile && !strcmp(profile->titleid,"RETROVITA") && !strcmp(profile->core,"pcsx_rearmed"));
+    profile=vp_launch_config_find(&launch_config,"rom.42");
+    assert(profile && !strcmp(profile->titleid,"RETROVITA") &&
+           !strcmp(profile->core,"app0:/mame2000_libretro.self"));
     app.active_view=VP_VIEW_CAROUSEL;
     assert(save_romm_config()); /* RomM saves keep the appearance selection. */
     file=fopen(VP_CONFIG_PATH,"r"); assert(file);
     size_t length=fread(saved,1,sizeof(saved)-1,file); fclose(file);
     saved[length]='\0';
     assert(strstr(saved,"active_view=carousel\n"));
+    assert(strstr(saved,"launch_rom.42=RETROVITA:app0:/mame2000_libretro.self\n"));
     assert(strstr(saved,"ui_wallpaper=violet\n"));
     assert(strstr(saved,"ui_text_color=dark\n"));
     assert(!symlink("/dev/full",VP_CONFIG_PATH ".tmp"));
@@ -209,6 +215,10 @@ static VpLibraryModal library_modal=VP_LIBRARY_MODAL_NONE;
 static size_t library_modal_row;
 static float panel_progress=1.f;
 static float library_modal_progress(void) { return panel_progress; }
+static int library_modal_rows(void) {
+    return library_modal==VP_LIBRARY_MODAL_NONE?0:
+        library_modal==VP_LIBRARY_MODAL_CORES?(int)vp_arcade_core_count():VP_LIBRARY_ACTIONS_ROWS;
+}
 static VpUiConsoleMotion console_motion;
 static int vp_ui_touch_platform(int x,int y) { return vp_ui_console_motion_touch(&console_motion,x,y); }
 static VpUiPreferences ui_preferences=VP_UI_PREFERENCES_DEFAULT;

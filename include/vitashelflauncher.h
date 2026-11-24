@@ -207,6 +207,7 @@ typedef struct {
 /* A core available for arcade ROMs. The empty core path means "no override". */
 typedef struct {
     const char *id;
+    const char *label;
     const char *core;
 } VpArcadeCore;
 

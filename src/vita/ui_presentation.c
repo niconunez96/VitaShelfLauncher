@@ -307,10 +307,22 @@ VpUiRect vp_ui_library_panel_row(size_t slot, float progress) {
     return r;
 }
 
-int vp_ui_touch_library_panel_row(float progress, int x, int y) {
+VpUiRect vp_ui_library_panel_core_row(size_t slot, float progress) {
+    VpUiRect panel = vp_ui_library_panel(progress);
+    VpUiRect r = {panel.x + 18, panel.y + 70 + (int)slot * 34, panel.w - 36, 30};
+    return r;
+}
+
+int vp_ui_touch_library_panel_row(float progress, int x, int y,
+                                  VpLibraryModal modal, int rows) {
     int slot;
-    for (slot = 0; slot < VP_LIBRARY_ACTIONS_ROWS; ++slot)
-        if (inside(vp_ui_library_panel_row((size_t)slot, progress), x, y)) return slot;
+    if (rows < 0) rows = 0;
+    for (slot = 0; slot < rows; ++slot) {
+        VpUiRect r = modal == VP_LIBRARY_MODAL_CORES
+                         ? vp_ui_library_panel_core_row((size_t)slot, progress)
+                         : vp_ui_library_panel_row((size_t)slot, progress);
+        if (inside(r, x, y)) return slot;
+    }
     return -1;
 }
 
