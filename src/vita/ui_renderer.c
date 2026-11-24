@@ -828,11 +828,12 @@ static void footer(const VpUiFrame *f) {
                f->settings_field==VP_UI_APPEARANCE_TEXT_COLOR_SLOT?"Cambiar color":"Aplicar fondo";
     if (f->app->active_screen==VP_SCREEN_SETTINGS && !f->settings_detail) action="Seleccionar";
     if (roms) {
-        button(3,366,513); text(f,VP_TYPE_FOOTER,383,518,62,C(12,32,76,255),"Vista");
-        button(2,510,513); text(f,VP_TYPE_FOOTER,527,518,104,C(12,32,76,255),"Opciones");
-        select_button(f,675,513);
-        text(f,VP_TYPE_FOOTER,710,518,62,C(12,32,76,255),"Filtros");
-        button(1,790,513); text(f,VP_TYPE_FOOTER,807,518,64,C(12,32,76,255),"Volver");
+        button(0,360,513); text(f,VP_TYPE_FOOTER,377,518,100,C(12,32,76,255),action);
+        button(3,490,513); text(f,VP_TYPE_FOOTER,507,518,62,C(12,32,76,255),"Vista");
+        button(2,575,513); text(f,VP_TYPE_FOOTER,592,518,104,C(12,32,76,255),"Opciones");
+        select_button(f,714,513);
+        text(f,VP_TYPE_FOOTER,749,518,62,C(12,32,76,255),"Filtros");
+        button(1,828,513); text(f,VP_TYPE_FOOTER,845,518,64,C(12,32,76,255),"Volver");
     } else {
         button(0,366,513); text(f,VP_TYPE_FOOTER,383,518,210,C(12,32,76,255),action);
         button(1,613,513); text(f,VP_TYPE_FOOTER,630,518,64,C(12,32,76,255),"Volver");

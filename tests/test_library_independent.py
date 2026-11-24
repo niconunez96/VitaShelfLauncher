@@ -178,10 +178,13 @@ int main(int argc,char **argv) {
         assert(touch_navigation_pressed(879,533)==SCE_CTRL_SELECT);
         assert(touch_navigation_pressed(880,513)==0);
         app.library_level=VP_LEVEL_ROMS;
-        assert(touch_navigation_pressed(366,513)==SCE_CTRL_TRIANGLE);
-        assert(touch_navigation_pressed(510,513)==SCE_CTRL_SQUARE);
-        assert(touch_navigation_pressed(675,513)==SCE_CTRL_SELECT);
-        assert(touch_navigation_pressed(790,513)==SCE_CTRL_CIRCLE);
+        assert(touch_navigation_pressed(344,513)==0);
+        assert(touch_navigation_pressed(360,513)==SCE_CTRL_CROSS);
+        assert(touch_navigation_pressed(490,513)==SCE_CTRL_TRIANGLE);
+        assert(touch_navigation_pressed(575,513)==SCE_CTRL_SQUARE);
+        assert(touch_navigation_pressed(714,513)==SCE_CTRL_SELECT);
+        assert(touch_navigation_pressed(828,513)==SCE_CTRL_CIRCLE);
+        assert(touch_navigation_pressed(905,513)==0);
         puts("touch: PASS");
     } else if (!strcmp(argv[1],"settings-touch")) {
         printf("save-icon-touch=%d\n",vp_ui_touch_view_toggle(815,513));

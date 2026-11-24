@@ -335,6 +335,23 @@ static void check_library_controls(VpUiFrame *frame,VpApp *app,cairo_surface_t *
     assert(strstr(frame_text,"SELECT\nFiltros\n"));
     assert(strstr(frame_text,"Vista\n")<strstr(frame_text,"Opciones\n"));
     assert(strstr(frame_text,"Opciones\n")<strstr(frame_text,"SELECT\n"));
+    {
+        const char *jugar,*vista,*opciones,*filtros,*volver;
+        bool cross=false;
+        int cross_x=-1;
+        for (size_t i=0;i<button_draw_count;i++)
+            if (button_draws[i].y==513 && button_draws[i].kind==0) { cross=true; cross_x=(int)button_draws[i].x; }
+        assert(cross && cross_x==360);
+        jugar=strstr(frame_text,"Jugar\n"); vista=strstr(frame_text,"Vista\n");
+        opciones=strstr(frame_text,"Opciones\n"); filtros=strstr(frame_text,"Filtros\n");
+        volver=strstr(frame_text,"Volver\n");
+        assert(jugar && vista && opciones && filtros && volver);
+        assert(jugar<vista && vista<opciones && opciones<filtros && filtros<volver);
+        app->catalog.items[app->selected_item].installed=false;
+        settle(frame);
+        assert(strstr(frame_text,"Descargar\n"));
+        app->catalog.items[app->selected_item].installed=true;
+    }
     for (int modal=VP_LIBRARY_MODAL_ACTIONS;modal<=VP_LIBRARY_MODAL_CORES;modal++) {
         VpUiRect panel=vp_ui_library_panel(1.f);
         frame->library_modal=(VpLibraryModal)modal; frame->library_modal_progress=1.f;

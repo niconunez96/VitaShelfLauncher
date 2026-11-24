@@ -403,11 +403,14 @@ int main(void) {
     assert(app.selected_platform==6);
     app.library_level=VP_LEVEL_ROMS; app.active_view=VP_VIEW_LIST;
     assert(library_modal_progress()==1.f);
-    assert(touch_navigation_pressed(366,513)==SCE_CTRL_TRIANGLE);
-    assert(touch_navigation_pressed(510,513)==SCE_CTRL_SQUARE);
-    assert(touch_navigation_pressed(675,513)==SCE_CTRL_SELECT);
+    assert(touch_navigation_pressed(366,513)==SCE_CTRL_CROSS);
+    assert(touch_navigation_pressed(490,513)==SCE_CTRL_TRIANGLE);
+    assert(touch_navigation_pressed(575,513)==SCE_CTRL_SQUARE);
+    assert(touch_navigation_pressed(714,513)==SCE_CTRL_SELECT);
     assert(touch_navigation_pressed(750,513)==SCE_CTRL_SELECT);
     assert(touch_navigation_pressed(810,513)==SCE_CTRL_CIRCLE);
+    assert(touch_navigation_pressed(828,513)==SCE_CTRL_CIRCLE);
+    assert(touch_navigation_pressed(905,513)==0);
     library_modal=VP_LIBRARY_MODAL_ACTIONS;
     for (int step=2;step<=4;step++) {
         panel_progress=(float)step/4;

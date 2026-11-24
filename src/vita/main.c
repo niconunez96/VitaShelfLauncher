@@ -2545,10 +2545,11 @@ static unsigned int touch_navigation_pressed(int x, int y) {
             }
             return SCE_CTRL_CROSS;
         }
-        if (y>=492 && y<534 && x>=340 && x<470) return SCE_CTRL_TRIANGLE;
-        if (y>=492 && y<534 && x>=480 && x<640) return SCE_CTRL_SQUARE;
-        if (y>=492 && y<534 && x>=645 && x<775) return SCE_CTRL_SELECT;
-        if (y>=492 && y<534 && x>=780 && x<875) return SCE_CTRL_CIRCLE;
+        if (y>=492 && y<534 && x>=345 && x<475) return SCE_CTRL_CROSS;
+        if (y>=492 && y<534 && x>=475 && x<557) return SCE_CTRL_TRIANGLE;
+        if (y>=492 && y<534 && x>=557 && x<681) return SCE_CTRL_SQUARE;
+        if (y>=492 && y<534 && x>=681 && x<810) return SCE_CTRL_SELECT;
+        if (y>=492 && y<534 && x>=810 && x<905) return SCE_CTRL_CIRCLE;
         if (app.active_view == VP_VIEW_CAROUSEL) {
             int offset=vp_ui_touch_carousel_offset(x,y);
             if (offset<0) return SCE_CTRL_LEFT;
