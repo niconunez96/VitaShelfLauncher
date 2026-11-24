@@ -44,7 +44,9 @@ test-vita-lifecycle:
 	python3 tests/test_download_lifecycle.py
 	python3 tests/test_vita_thread_priority.py
 	python3 tests/test_romm_worker.py
+	python3 tests/test_romm_pairing.py
 	python3 tests/test_artwork_worker.py
+	python3 tests/test_sync_progress.py
 	python3 tests/test_settings_navigation.py
 	python3 tests/test_vita_touch_navigation.py
 	python3 tests/test_library_independent.py

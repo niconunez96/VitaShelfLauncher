@@ -756,11 +756,26 @@ static void test_libretro_thumbnail_safety(void) {
     assert(!vp_libretro_thumbnail_url(&item, url, sizeof(url)));
 }
 
+typedef struct {
+    size_t calls, processed[VP_MAX_ITEMS + 2], total[VP_MAX_ITEMS + 2];
+} SyncProgressLog;
+
+static void record_sync_progress(size_t processed, size_t total, void *context) {
+    SyncProgressLog *log = context;
+    assert(log->calls < VP_MAX_ITEMS + 2);
+    if (log->calls) assert(processed >= log->processed[log->calls - 1]);
+    assert(!total || processed <= total);
+    log->processed[log->calls] = processed;
+    log->total[log->calls++] = total;
+}
+
 static void test_romm_pagination(void) {
     VpCatalog catalog;
     FetchLog fetch_log;
     VpFetchBackend backend;
     VpRommConfig config;
+    SyncProgressLog progress_log = {0};
+    VpSyncProgressBackend progress = {record_sync_progress, &progress_log};
 
     memset(&fetch_log, 0, sizeof(fetch_log));
     memset(&config, 0, sizeof(config));
@@ -773,7 +788,11 @@ static void test_romm_pagination(void) {
     backend.context = &fetch_log;
     vp_catalog_init(&catalog);
 
-    assert(vp_romm_sync(&catalog, &config, backend));
+    assert(vp_romm_sync_with_progress(&catalog, &config, backend, progress));
+    assert(progress_log.calls == 3);
+    assert(progress_log.processed[0] == 0 && progress_log.total[0] == 0);
+    assert(progress_log.processed[1] == 1 && progress_log.total[1] == 2);
+    assert(progress_log.processed[2] == 2 && progress_log.total[2] == 2);
     assert(catalog.count == 2);
     assert(fetch_log.calls == 2);
     assert(strcmp(fetch_log.urls[0], "https://romm.local/api/roms?limit=1&offset=0&with_char_index=false&with_filter_values=false&with_rom_id_index=false") == 0);
@@ -781,6 +800,45 @@ static void test_romm_pagination(void) {
     assert(strcmp(fetch_log.bearer, "rmm_test_token") == 0);
     assert(vp_catalog_find(&catalog, "romm:1") != NULL);
     assert(vp_catalog_find(&catalog, "romm:2") != NULL);
+
+    /* Unknown totals stay indeterminate until an empty page ends the sync. */
+    fetch_log.calls = 0;
+    fetch_log.pages[0] = "{\"items\":[{\"id\":1,\"name\":\"First\"}]}";
+    fetch_log.pages[1] = "{\"items\":[]}";
+    progress_log = (SyncProgressLog){0};
+    vp_catalog_init(&catalog);
+    assert(vp_romm_sync_with_progress(&catalog, &config, backend, progress));
+    assert(progress_log.processed[2] == 1 && progress_log.total[2] == 0);
+
+    fetch_log.calls = 0;
+    fetch_log.page_count = 1;
+    fetch_log.pages[0] = "{\"total\":0,\"items\":[]}";
+    progress_log = (SyncProgressLog){0};
+    vp_catalog_init(&catalog);
+    assert(vp_romm_sync_with_progress(&catalog, &config, backend, progress));
+    assert(catalog.count == 0 && progress_log.calls == 2);
+
+    /* A large server library reports the bounded work this client can import. */
+    fetch_log.calls = 0;
+    fetch_log.page_count = 2;
+    fetch_log.pages[0] = "{\"total\":1000,\"items\":[{\"id\":1,\"name\":\"First\"}]}";
+    fetch_log.pages[1] = "{\"total\":1000,\"items\":[]}";
+    progress_log = (SyncProgressLog){0};
+    vp_catalog_init(&catalog);
+    assert(vp_romm_sync_with_progress(&catalog, &config, backend, progress));
+    assert(progress_log.total[1] == VP_MAX_ITEMS);
+
+    /* The legacy wrapper keeps reporting whether anything was imported. */
+    fetch_log.calls = 0;
+    fetch_log.page_count = 1;
+    fetch_log.pages[0] = "{\"total\":0,\"items\":[]}";
+    vp_catalog_init(&catalog);
+    assert(!vp_romm_sync(&catalog, &config, backend));
+
+    fetch_log.calls = 0;
+    fetch_log.pages[0] = "{\"total\":1,\"items\":[{\"id\":1,\"name\":\"First\"}]}";
+    vp_catalog_init(&catalog);
+    assert(vp_romm_sync(&catalog, &config, backend));
 }
 
 static void test_romm_sync_fails_after_partial_page(void) {
@@ -788,6 +846,8 @@ static void test_romm_sync_fails_after_partial_page(void) {
     FetchLog fetch_log;
     VpFetchBackend backend;
     VpRommConfig config;
+    SyncProgressLog progress_log = {0};
+    VpSyncProgressBackend progress = {record_sync_progress, &progress_log};
 
     memset(&fetch_log, 0, sizeof(fetch_log));
     memset(&config, 0, sizeof(config));
@@ -800,7 +860,9 @@ static void test_romm_sync_fails_after_partial_page(void) {
     backend.context = &fetch_log;
     vp_catalog_init(&catalog);
 
-    assert(!vp_romm_sync(&catalog, &config, backend));
+    assert(!vp_romm_sync_with_progress(&catalog, &config, backend, progress));
+    assert(progress_log.calls == 2);
+    assert(progress_log.processed[1] == 1 && progress_log.total[1] == 2);
     assert(catalog.count == 1);
     assert(fetch_log.calls == 2);
 }

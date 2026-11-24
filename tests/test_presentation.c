@@ -4,6 +4,37 @@
 #include <stdio.h>
 #include <string.h>
 
+static void test_sync_feedback(void) {
+    char text[128];
+    VpUiSyncStatus status = {.state=VP_SYNC_RUNNING, .operation=VP_SYNC_METADATA,
+        .stage=VP_SYNC_PROCESSING, .processed=3, .total=8};
+    assert(vp_ui_sync_percent(&status)==37);
+    vp_ui_sync_text(&status,text,sizeof(text));
+    assert(strstr(text,"RomM: metadata") && strstr(text,"37% (3/8)"));
+    status.processed=8;
+    assert(vp_ui_sync_percent(&status)==99);
+    status.state=VP_SYNC_SUCCEEDED;
+    assert(vp_ui_sync_percent(&status)==100);
+    vp_ui_sync_text(&status,text,sizeof(text));
+    assert(strstr(text,"RomM: metadata") && strstr(text,"completado") && strstr(text,"100%"));
+    status.state=VP_SYNC_FAILED; status.processed=2;
+    vp_ui_sync_text(&status,text,sizeof(text));
+    assert(strstr(text,"RomM: metadata") && strstr(text,"fallido") && strstr(text,"25%"));
+    status.state=VP_SYNC_RUNNING; status.total=0;
+    vp_ui_sync_text(&status,text,sizeof(text));
+    assert(!strchr(text,'%') && strstr(text,"RomM: metadata") && strstr(text,"2 procesados"));
+    status.stage=VP_SYNC_WAITING;status.operation=VP_SYNC_CATALOG;
+    vp_ui_sync_text(&status,text,sizeof(text));
+    assert(strstr(text,"RomM: catálogo") && strstr(text,"en cola") && !strchr(text,'%'));
+    status.operation=VP_SYNC_STEAMGRID; status.stage=VP_SYNC_PROCESSING;
+    status.processed=3; status.total=8;
+    vp_ui_sync_text(&status,text,sizeof(text));
+    assert(strstr(text,"SteamGridDB: carátulas") && strstr(text,"37% (3/8)"));
+    assert(!strstr(text,"Metadata"));
+    status.processed=0; status.state=VP_SYNC_SUCCEEDED;
+    assert(vp_ui_sync_percent(&status)==100);
+}
+
 static void test_console_motion(void) {
     VpUiConsoleMotion m={0};
     VpUiRect focused,plain,before,after;
@@ -113,6 +144,7 @@ static void test_carousel_motion(void) {
 }
 
 int main(void) {
+    test_sync_feedback();
     VpUiAppearance appearance = {180, 16, 130};
     const char *aliases[][2] = {
         {"SNES", "snes"}, {"megadrive", "genesis"}, {"mega-drive", "genesis"},

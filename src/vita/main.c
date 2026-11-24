@@ -152,6 +152,7 @@ typedef struct {
     VpConnectionState connection_state;
     size_t omitted;
     size_t covers_missing;
+    VpUiSyncStatus sync;
 } VpBackgroundJob;
 
 /* The core fetch buffer and backend diagnostics are deliberately single-owner. The background
@@ -159,6 +160,149 @@ typedef struct {
 static VpBackgroundJob background_job = {
     .mutex = PTHREAD_MUTEX_INITIALIZER
 };
+/* UI-owned intent: the worker receives an immutable copy when its slot is free. */
+static struct {
+    bool active;
+    unsigned long revision;
+    char code[VP_TEXT];
+} romm_pairing;
+/* UI-owned intent for explicit sync/check requests that arrive while the singleton worker
+ * is busy. Dispatched before automatic scans so user input is never silently dropped. */
+static struct {
+    bool active;
+    VpJobKind kind;
+} pending_user_job;
+static struct {
+    VpUiSyncStatus status;
+    unsigned long romm_revision, integration_revision;
+} sync_results[VP_INTEGRATION_COUNT];
+
+static const char *background_job_label(VpJobKind kind) {
+    switch (kind) {
+        case VP_JOB_SCAN_LOCAL: return "búsqueda de juegos instalados";
+        case VP_JOB_VALIDATE_ROMM: return "comprobación de RomM";
+        case VP_JOB_SYNC_PROVIDERS: return "sincronización del catálogo";
+        case VP_JOB_PAIR_AND_SYNC: return "canje del código de RomM";
+        case VP_JOB_SYNC_COVERS: return "sincronización de metadata";
+        case VP_JOB_SYNC_STEAMGRID: return "sincronización de SteamGridDB";
+        case VP_JOB_CHECK_STEAMGRID: return "comprobación de SteamGridDB";
+        case VP_JOB_CHECK_IMAGES: return "comprobación de Image Service";
+        case VP_JOB_DOWNLOAD_ROM: return "descarga de un juego";
+        case VP_JOB_INSTALL_HOMEBREW: return "instalación de homebrew";
+        default: return "finalización de la tarea anterior";
+    }
+}
+
+static const char *background_job_active_label(void) {
+    const char *label;
+    pthread_mutex_lock(&background_job.mutex);
+    label = background_job_label(background_job.active ? background_job.kind : VP_JOB_NONE);
+    pthread_mutex_unlock(&background_job.mutex);
+    return label;
+}
+
+/* One visible title per service, reused by toasts and queued-job notices. */
+static const char *sync_job_title(VpJobKind kind) {
+    switch (kind) {
+        case VP_JOB_SYNC_PROVIDERS: return "RomM: catálogo";
+        case VP_JOB_VALIDATE_ROMM: return "RomM: conexión";
+        case VP_JOB_SYNC_COVERS: return "RomM: metadata";
+        case VP_JOB_CHECK_STEAMGRID: return "SteamGridDB: conexión";
+        case VP_JOB_SYNC_STEAMGRID: return "SteamGridDB: carátulas";
+        case VP_JOB_CHECK_IMAGES: return "Image Service: conexión";
+        default: return background_job_label(kind);
+    }
+}
+
+static void sync_progress(size_t processed, size_t total, void *context) {
+    VpBackgroundJob *job = context;
+    pthread_mutex_lock(&job->mutex);
+    job->sync.stage = VP_SYNC_PROCESSING;
+    job->sync.processed = processed;
+    job->sync.total = total;
+    pthread_mutex_unlock(&job->mutex);
+}
+
+static void sync_item_finished(VpBackgroundJob *job, bool ready, bool missing, bool failed) {
+    pthread_mutex_lock(&job->mutex);
+    job->sync.stage = VP_SYNC_PROCESSING;
+    job->sync.processed++;
+    job->sync.ready += ready;
+    job->sync.missing += missing;
+    job->sync.failed += failed;
+    pthread_mutex_unlock(&job->mutex);
+}
+
+/* Called on the UI thread after joining. Retain results independently of the next job. */
+static void sync_result_publish(VpBackgroundJob *job) {
+    int integration = job->sync.operation == VP_SYNC_STEAMGRID ? VP_INTEGRATION_STEAMGRID : VP_INTEGRATION_ROMM;
+    VpUiSyncStatus status = job->sync;
+    if (status.state == VP_SYNC_IDLE) return;
+    if ((integration == VP_INTEGRATION_ROMM && job->romm_revision != romm_connection.revision) ||
+        (status.operation != VP_SYNC_CATALOG && job->integration_revision != integration_revision)) return;
+    status.state = job->succeeded ? VP_SYNC_SUCCEEDED : VP_SYNC_FAILED;
+    if (job->succeeded && !status.total) status.total = status.processed;
+    if (status.operation == VP_SYNC_CATALOG)
+        (void)snprintf(status.detail, sizeof(status.detail), "RomM: catálogo — %s", job->succeeded ?
+            "completado." : "fallido. Revisa RomM y la red.");
+    else if (status.operation == VP_SYNC_STEAMGRID)
+        (void)snprintf(status.detail, sizeof(status.detail),
+            "SteamGridDB: carátulas — %s · %u listas · %u sin coincidencia · %u fallidas%s",
+            job->succeeded ? "completado" : "fallido", (unsigned)status.ready,
+            (unsigned)status.missing, (unsigned)status.failed,
+            job->succeeded ? "" : ". Revisa la conexión y Image Service.");
+    else
+        (void)snprintf(status.detail, sizeof(status.detail), "RomM: metadata — %s · %u/%u carátulas%s",
+            job->succeeded ? "completado" : "fallido", (unsigned)status.ready,
+            (unsigned)status.total, job->succeeded ? "" : ". Revisa la conexión.");
+    if (!job->succeeded && status.operation == VP_SYNC_STEAMGRID) {
+        const char *reason = job->connection_state == VP_CONNECTION_INVALID_KEY ?
+            "API key inválida o sin permisos; revisa la clave." :
+            job->connection_state == VP_CONNECTION_RATE_LIMITED ?
+            "Límite de solicitudes alcanzado; reintenta más tarde." :
+            job->connection_state == VP_CONNECTION_UNREACHABLE ?
+            "No se pudo conectar; revisa la red y reintenta." : NULL;
+        if (reason) (void)snprintf(status.detail, sizeof(status.detail),
+            "SteamGridDB: carátulas — fallido. %s", reason);
+    }
+    if (!job->succeeded && status.operation == VP_SYNC_CATALOG &&
+        (job->romm_state == VP_ROMM_INVALID_TOKEN || job->romm_state == VP_ROMM_FORBIDDEN))
+        (void)snprintf(status.detail, sizeof(status.detail), "RomM: catálogo — fallido. %s",
+            job->romm_state == VP_ROMM_INVALID_TOKEN ?
+                "El token ya no funciona; ingresa un nuevo pair code en RomM." :
+                "El token no tiene permisos de lectura; revisa RomM.");
+    sync_results[integration].status = status;
+    sync_results[integration].romm_revision = job->romm_revision;
+    sync_results[integration].integration_revision = job->integration_revision;
+}
+
+/* The caller holds the job mutex; only copy status for the current configuration. */
+static VpUiSyncStatus sync_status_snapshot(int integration) {
+    VpUiSyncStatus status = {0};
+    bool romm = integration == VP_INTEGRATION_ROMM;
+    int active_integration = background_job.sync.operation == VP_SYNC_STEAMGRID ?
+        VP_INTEGRATION_STEAMGRID : VP_INTEGRATION_ROMM;
+    if (integration != VP_INTEGRATION_ROMM && integration != VP_INTEGRATION_STEAMGRID) return status;
+    if (romm && romm_pairing.active && romm_pairing.revision == romm_connection.revision) {
+        status.state = VP_SYNC_RUNNING;
+        status.operation = VP_SYNC_CATALOG;
+        status.stage = VP_SYNC_WAITING;
+        (void)snprintf(status.detail, sizeof(status.detail), "En espera de: %s. El código se canjeará automáticamente.",
+            background_job_label(background_job.kind));
+        return status;
+    }
+    if ((!romm || sync_results[integration].romm_revision == romm_connection.revision) &&
+        (sync_results[integration].status.operation == VP_SYNC_CATALOG ||
+         sync_results[integration].integration_revision == integration_revision))
+        status = sync_results[integration].status;
+    if (background_job.active && background_job.sync.state == VP_SYNC_RUNNING &&
+        active_integration == integration &&
+        (!romm || background_job.romm_revision == romm_connection.revision) &&
+        (background_job.sync.operation == VP_SYNC_CATALOG ||
+         background_job.integration_revision == integration_revision))
+        status = background_job.sync;
+    return status;
+}
 static VpDownloadQueue download_queue;
 /* Three grid rows can be visible during a drag; retain the selected cover too. */
 #define VP_COVER_SLOTS (VP_UI_GRID_WINDOW + 1)
@@ -175,6 +319,9 @@ static size_t catalog_omitted;
 static bool download_progress(unsigned long long downloaded, unsigned long long total, void *context);
 static void cover_path_for(const char *id, char *path, size_t capacity);
 static void artwork_path_for(const char *id, char *path, size_t capacity);
+static bool sync_cover_metadata(VpApp *app);
+static bool request_user_job(VpApp *app, VpJobKind kind);
+static bool start_pending_user_job(void);
 
 static void show_notification(VpApp *app, const char *format, ...) {
     va_list arguments;
@@ -186,11 +333,11 @@ static void show_notification(VpApp *app, const char *format, ...) {
 }
 
 static void request_romm_check(void) {
+    if (romm_pairing.active) return;
     if (romm_config.base_url[0] == '\0' || romm_config.token[0] == '\0') {
         romm_connection.state = VP_ROMM_UNCONFIGURED;
         romm_check_pending = false;
     } else if (romm_connection.state != VP_ROMM_CHECKING) {
-        romm_connection.state = VP_ROMM_CHECKING;
         romm_check_pending = true;
     }
 }
@@ -576,6 +723,7 @@ static void *background_job_run(void *context) {
         VpFetchBackend fetch_backend = {vp_vita_fetch, NULL};
         VpFetchBackend romm_backend = {fetch_romm_catalog, &job->romm_state};
         VpRommProbeBackend probe_backend = {vp_vita_probe_romm, NULL};
+        VpSyncProgressBackend progress_backend = {sync_progress, job};
         vp_catalog_init(&job->catalog);
         if (kind == VP_JOB_PAIR_AND_SYNC) {
             VpRommPairBackend pair_backend = {vp_vita_exchange_pair_code, NULL};
@@ -587,7 +735,7 @@ static void *background_job_run(void *context) {
         if (config.base_url[0] != '\0' && config.token[0] != '\0') {
             romm_requested = true;
             succeeded = job->romm_state == VP_ROMM_CONNECTED &&
-                        vp_romm_sync(&job->catalog, &config, romm_backend);
+                        vp_romm_sync_with_progress(&job->catalog, &config, romm_backend, progress_backend);
         }
         if (homebrew.catalog_url[0] != '\0') {
             homebrew_requested = true;
@@ -595,7 +743,13 @@ static void *background_job_run(void *context) {
                         (!romm_requested || succeeded);
         }
         if (!romm_requested && !homebrew_requested) succeeded = false;
-        if (succeeded) (void)save_catalog_cache(&job->catalog, &config);
+        pthread_mutex_lock(&job->mutex);
+        job->sync.stage = VP_SYNC_SAVING;
+        pthread_mutex_unlock(&job->mutex);
+        if (succeeded && !save_catalog_cache(&job->catalog, &config)) {
+            vp_vita_set_error("No se pudo guardar el catálogo");
+            succeeded = false;
+        }
     } else if (kind == VP_JOB_SYNC_COVERS) {
         VpCoverTransformBackend cover_backend = {vp_vita_transform_cover, NULL};
         VpCoverTransformBackend artwork_backend = {vp_vita_transform_background, NULL};
@@ -606,9 +760,11 @@ static void *background_job_run(void *context) {
             char destination[VP_PATH];
             char partial[VP_PATH + 8];
             bool transformed;
+            bool item_failed;
             if (cover->source != VP_SOURCE_ROMM || cover->cover_url[0] == '\0') continue;
             cover_path_for(cover->id, destination, sizeof(destination));
             if (snprintf(partial, sizeof(partial), "%s.tmp", destination) >= (int)sizeof(partial)) {
+                sync_item_finished(job, false, false, true);
                 succeeded = false;
                 break;
             }
@@ -619,6 +775,12 @@ static void *background_job_run(void *context) {
                 if (!transformed) (void)sceIoRemove(partial);
             }
             if (!transformed) succeeded = false;
+            item_failed = !transformed;
+            if (transformed) {
+                pthread_mutex_lock(&job->mutex);
+                job->covers_completed++;
+                pthread_mutex_unlock(&job->mutex);
+            }
             if (cover->background_url[0]!='\0') {
                 VpItem artwork=*cover;
                 (void)snprintf(artwork.cover_url,sizeof(artwork.cover_url),"%s",cover->background_url);
@@ -626,12 +788,14 @@ static void *background_job_run(void *context) {
                 (void)snprintf(partial,sizeof(partial),"%s.tmp",destination);
                 if (vp_cache_cover(&artwork,&config,partial,artwork_backend)) {
                     (void)sceIoRemove(destination);
-                    if (sceIoRename(partial,destination)<0) (void)sceIoRemove(partial);
-                }
+                    if (sceIoRename(partial,destination)<0) {
+                        (void)sceIoRemove(partial);
+                        item_failed = true;
+                    }
+                } else item_failed = true;
             }
-            pthread_mutex_lock(&job->mutex);
-            job->covers_completed++;
-            pthread_mutex_unlock(&job->mutex);
+            if (item_failed) succeeded = false;
+            sync_item_finished(job, !item_failed, false, item_failed);
         }
     } else if (kind == VP_JOB_SCAN_LOCAL) {
         succeeded=vp_local_scan(&job->catalog,"ux0:app","ur0:appmeta",&job->omitted);
@@ -659,21 +823,36 @@ static void *background_job_run(void *context) {
                 pthread_mutex_lock(&job->mutex);
                 job->covers_completed++;
                 pthread_mutex_unlock(&job->mutex);
+                sync_item_finished(job, true, false, false);
                 continue;
             }
             result=vp_steamgrid_cover(cover,job->steamgrid_key,backend,&job->connection_state);
-            if (result==VP_ARTWORK_FAILED) { succeeded=false; break; }
-            if (result==VP_ARTWORK_NOT_FOUND) { job->covers_missing++; continue; }
+            if (result==VP_ARTWORK_FAILED) {
+                sync_item_finished(job, false, false, true);
+                succeeded=false;
+                break;
+            }
+            if (result==VP_ARTWORK_NOT_FOUND) {
+                job->covers_missing++;
+                sync_item_finished(job, false, true, false);
+                continue;
+            }
+            bool ready = false;
             (void)snprintf(temp,sizeof(temp),"%s.tmp",path);
             if (vp_cache_cover(cover,&config,temp,transform)) {
                 (void)sceIoRemove(path);
                 if (sceIoRename(temp,path)>=0) {
-                    (void)vp_local_artwork_save(cover,VP_ARTWORK_CACHE);
-                    pthread_mutex_lock(&job->mutex);
-                    job->covers_completed++;
-                    pthread_mutex_unlock(&job->mutex);
+                    ready = vp_local_artwork_save(cover,VP_ARTWORK_CACHE);
+                    if (!ready) succeeded=false;
+                    else {
+                        pthread_mutex_lock(&job->mutex);
+                        job->covers_completed++;
+                        pthread_mutex_unlock(&job->mutex);
+                    }
                 } else { (void)sceIoRemove(temp); succeeded=false; }
-            } else { succeeded=false; break; }
+            } else succeeded=false;
+            sync_item_finished(job, ready, false, !ready);
+            if (!ready) break;
         }
     } else {
         VpTransferBackend transfer_backend = {vp_vita_transfer, NULL};
@@ -740,13 +919,20 @@ static bool background_job_start(VpJobKind kind, const VpItem *item, const char 
     background_job.integration_revision=integration_revision;
     background_job.omitted=0;
     background_job.covers_missing=0;
+    memset(&background_job.sync, 0, sizeof(background_job.sync));
+    if (kind == VP_JOB_SYNC_PROVIDERS || kind == VP_JOB_PAIR_AND_SYNC || kind == VP_JOB_SYNC_STEAMGRID) {
+        background_job.sync.state = VP_SYNC_RUNNING;
+        background_job.sync.operation = kind == VP_JOB_SYNC_STEAMGRID ? VP_SYNC_STEAMGRID : VP_SYNC_CATALOG;
+    }
     (void)snprintf(background_job.steamgrid_key,sizeof(background_job.steamgrid_key),"%s",steamgrid_api_key);
     if (kind==VP_JOB_SYNC_STEAMGRID) background_job.catalog=app.catalog;
     if (kind==VP_JOB_SYNC_STEAMGRID) for (size_t i=0;i<background_job.catalog.count;i++)
         if (background_job.catalog.items[i].source==VP_SOURCE_LOCAL && !strcmp(background_job.catalog.items[i].platform,"psvita"))
             background_job.covers_total++;
+    background_job.sync.total = background_job.covers_total;
     background_job.homebrew = homebrew_config;
-    (void)snprintf(background_job.pair_code, sizeof(background_job.pair_code), "%s", romm_pair_code);
+    (void)snprintf(background_job.pair_code, sizeof(background_job.pair_code), "%s",
+        kind == VP_JOB_PAIR_AND_SYNC && romm_pairing.active ? romm_pairing.code : romm_pair_code);
     memset(&background_job.item, 0, sizeof(background_job.item));
     if (item != NULL) background_job.item = *item;
     (void)snprintf(background_job.destination, sizeof(background_job.destination), "%s",
@@ -758,6 +944,7 @@ static bool background_job_start(VpJobKind kind, const VpItem *item, const char 
     result = pthread_create(&background_job.thread, NULL, background_job_run, &background_job);
     if (result != 0) background_job.active = false;
     pthread_mutex_unlock(&background_job.mutex);
+    if (result != 0) sync_result_publish(&background_job);
     if (result == 0 && (kind == VP_JOB_VALIDATE_ROMM || kind == VP_JOB_SYNC_PROVIDERS ||
                          kind == VP_JOB_PAIR_AND_SYNC)) {
         romm_connection.state = kind == VP_JOB_PAIR_AND_SYNC ||
@@ -773,6 +960,93 @@ static bool background_job_start(VpJobKind kind, const VpItem *item, const char 
     return result == 0;
 }
 
+static bool start_pending_romm_pairing(void) {
+    bool busy;
+    if (!romm_pairing.active) return false;
+    if (romm_pairing.revision != romm_connection.revision) {
+        memset(&romm_pairing, 0, sizeof(romm_pairing));
+        return false;
+    }
+    if (background_job_start(VP_JOB_PAIR_AND_SYNC, NULL, NULL, NULL)) {
+        memset(&romm_pairing, 0, sizeof(romm_pairing));
+        show_notification(&app, "Canjeando código y sincronizando catálogo");
+        return true;
+    }
+    pthread_mutex_lock(&background_job.mutex);
+    busy = background_job.active;
+    pthread_mutex_unlock(&background_job.mutex);
+    if (!busy) {
+        memset(&romm_pairing, 0, sizeof(romm_pairing));
+        show_notification(&app, "No se pudo iniciar el canje de RomM; reintenta con Triángulo");
+    }
+    return false;
+}
+
+static bool request_user_job(VpApp *app, VpJobKind kind) {
+    bool busy;
+    if (background_job_start(kind, NULL, NULL, NULL)) {
+        show_notification(app, "%s — iniciado", sync_job_title(kind));
+        return true;
+    }
+    pthread_mutex_lock(&background_job.mutex);
+    busy = background_job.active;
+    pthread_mutex_unlock(&background_job.mutex);
+    if (!busy) {
+        show_notification(app, "%s — fallido: no se pudo iniciar", sync_job_title(kind));
+        return false;
+    }
+    if (pending_user_job.active) {
+        if (pending_user_job.kind == kind) return true;
+        show_notification(app, "%s — fallido: ya hay una tarea pendiente; espera a que termine",
+            sync_job_title(kind));
+        return false;
+    }
+    pending_user_job.active = true;
+    pending_user_job.kind = kind;
+    show_notification(app, "%s — en cola (%s)", sync_job_title(kind), background_job_active_label());
+    return true;
+}
+
+static bool start_pending_user_job(void) {
+    VpJobKind kind;
+    bool busy;
+    if (!pending_user_job.active) return false;
+    kind = pending_user_job.kind;
+    if (kind == VP_JOB_SYNC_COVERS) {
+        if (!sync_cover_metadata(&app)) return false;
+    } else if (!background_job_start(kind, NULL, NULL, NULL)) {
+        pthread_mutex_lock(&background_job.mutex);
+        busy = background_job.active;
+        pthread_mutex_unlock(&background_job.mutex);
+        if (!busy) {
+            memset(&pending_user_job, 0, sizeof(pending_user_job));
+            show_notification(&app, "%s — fallido: no se pudo iniciar", sync_job_title(kind));
+        }
+        return false;
+    }
+    memset(&pending_user_job, 0, sizeof(pending_user_job));
+    if (kind != VP_JOB_SYNC_COVERS)
+        show_notification(&app, "%s — iniciado", sync_job_title(kind));
+    return true;
+}
+
+static void request_romm_pairing(VpApp *app) {
+    VpJobKind active_kind;
+    pthread_mutex_lock(&background_job.mutex);
+    active_kind = background_job.active ? background_job.kind : VP_JOB_NONE;
+    pthread_mutex_unlock(&background_job.mutex);
+    if (active_kind == VP_JOB_PAIR_AND_SYNC) {
+        show_notification(app, "El canje de RomM ya está en curso; espera a que termine");
+        return;
+    }
+    romm_pairing.active = true;
+    romm_pairing.revision = romm_connection.revision;
+    (void)snprintf(romm_pairing.code, sizeof(romm_pairing.code), "%s", romm_pair_code);
+    romm_check_pending = false;
+    if (!start_pending_romm_pairing() && romm_pairing.active)
+        show_notification(app, "Canje de RomM en cola: %s", background_job_label(active_kind));
+}
+
 static bool download_progress(unsigned long long downloaded, unsigned long long total, void *context) {
     VpBackgroundJob *job = context;
     bool canceled;
@@ -786,6 +1060,8 @@ static bool download_progress(unsigned long long downloaded, unsigned long long 
 
 static bool start_next_download(void) {
     VpDownloadEntry *entry;
+    if (romm_pairing.active) return start_pending_romm_pairing();
+    if (pending_user_job.active) return false;
     if (romm_check_pending && background_job_start(VP_JOB_VALIDATE_ROMM, NULL, NULL, NULL))
         return true;
     pthread_mutex_lock(&background_job.mutex);
@@ -877,6 +1153,7 @@ static void background_job_poll(VpApp *app) {
     background_job.kind = VP_JOB_NONE;
     pthread_mutex_unlock(&background_job.mutex);
 
+    if (background_job.sync.operation != VP_SYNC_CATALOG) sync_result_publish(&background_job);
     if (kind==VP_JOB_SCAN_LOCAL) {
         if (succeeded) {
             for (size_t i=0;i<background_job.catalog.count;i++) {
@@ -907,6 +1184,9 @@ static void background_job_poll(VpApp *app) {
         if (background_job.integration_revision==integration_revision) {
             if (kind==VP_JOB_CHECK_IMAGES) image_service_state=background_job.connection_state;
             else steamgrid_state=background_job.connection_state;
+            if (kind!=VP_JOB_SYNC_STEAMGRID)
+                show_notification(app, "%s — %s", sync_job_title(kind),
+                    succeeded ? "completado" : "fallido");
             if (kind==VP_JOB_SYNC_STEAMGRID) {
                 for (size_t i=0;i<background_job.catalog.count;i++) {
                     const VpItem *updated=&background_job.catalog.items[i];
@@ -916,7 +1196,7 @@ static void background_job_poll(VpApp *app) {
                     (void)snprintf(current->remote_id,sizeof(current->remote_id),"%s",updated->remote_id);
                 }
                 cover_cache_dirty=true;
-                show_notification(app,succeeded?"Carátulas listas: %u/%u (%u sin coincidencia)":"Sincronización detenida: %u/%u listas; revisa Integraciones",
+                show_notification(app,succeeded?"SteamGridDB: carátulas — completado · %u/%u listas (%u sin coincidencia)":"SteamGridDB: carátulas — fallido · %u/%u listas; revisa Integraciones",
                     (unsigned)covers_completed,(unsigned)background_job.covers_total,(unsigned)background_job.covers_missing);
             }
         }
@@ -935,7 +1215,9 @@ static void background_job_poll(VpApp *app) {
             romm_config = config;
             memset(romm_pair_code, 0, sizeof(romm_pair_code));
             if (!save_romm_config()) {
-                show_notification(app, "Token recibido, pero no se pudo guardar la configuracion");
+                background_job.succeeded = false;
+                sync_result_publish(&background_job);
+                show_notification(app, "RomM: conexión — fallido: no se pudo guardar la configuración");
                 (void)start_next_download();
                 return;
             }
@@ -946,8 +1228,9 @@ static void background_job_poll(VpApp *app) {
         }
     }
 
+    if (background_job.sync.operation == VP_SYNC_CATALOG) sync_result_publish(&background_job);
     if (!succeeded && kind != VP_JOB_DOWNLOAD_ROM) {
-        show_notification(app, "Operacion fallida: %.140s", error);
+        show_notification(app, "%s — fallido: %.140s", sync_job_title(kind), error);
         (void)start_next_download();
         return;
     }
@@ -961,10 +1244,10 @@ static void background_job_poll(VpApp *app) {
                 (void)snprintf(catalog_synced_at,sizeof(catalog_synced_at),"%02u/%02u/%04u %02u:%02u",
                     now.day,now.month,now.year,now.hour,now.minute);
         }
-        show_notification(app, "Biblioteca sincronizada: %u juegos", (unsigned)app->catalog.count);
-        if (catalog_omitted) show_notification(app,"Límite de biblioteca: %u juegos remotos omitidos",(unsigned)catalog_omitted);
+        show_notification(app, "RomM: catálogo — completado · %u juegos", (unsigned)app->catalog.count);
+        if (catalog_omitted) show_notification(app,"RomM: catálogo — %u juegos remotos omitidos",(unsigned)catalog_omitted);
     } else if (kind == VP_JOB_SYNC_COVERS) {
-        show_notification(app, "Metadata sincronizada: %u/%u caratulas",
+        show_notification(app, "RomM: metadata — completado · %u/%u carátulas",
                           (unsigned)covers_completed, (unsigned)covers_total);
     } else if (kind == VP_JOB_DOWNLOAD_ROM) {
         VpDownloadEntry *entry = vp_download_queue_find(&download_queue, item.id);
@@ -1017,10 +1300,9 @@ static void background_job_poll(VpApp *app) {
 }
 
 static bool sync_romm_catalog(VpApp *app) {
-    (void)app;
     if ((romm_config.base_url[0] == '\0' || romm_config.token[0] == '\0') &&
         homebrew_config.catalog_url[0] == '\0') return false;
-    return background_job_start(VP_JOB_SYNC_PROVIDERS, NULL, NULL, NULL);
+    return request_user_job(app, VP_JOB_SYNC_PROVIDERS);
 }
 
 static bool sync_cover_metadata(VpApp *app) {
@@ -1030,7 +1312,18 @@ static bool sync_cover_metadata(VpApp *app) {
     pthread_mutex_lock(&background_job.mutex);
     if (background_job.active) {
         pthread_mutex_unlock(&background_job.mutex);
-        return false;
+        if (pending_user_job.active && pending_user_job.kind != VP_JOB_SYNC_COVERS) {
+            show_notification(app, "%s — fallido: ya hay una tarea pendiente; espera a que termine",
+                sync_job_title(VP_JOB_SYNC_COVERS));
+            return false;
+        }
+        if (!pending_user_job.active) {
+            pending_user_job.active = true;
+            pending_user_job.kind = VP_JOB_SYNC_COVERS;
+        }
+        show_notification(app, "%s — en cola (%s)", sync_job_title(VP_JOB_SYNC_COVERS),
+            background_job_active_label());
+        return true;
     }
     background_job.kind = VP_JOB_SYNC_COVERS;
     background_job.completed = false;
@@ -1040,6 +1333,12 @@ static bool sync_cover_metadata(VpApp *app) {
     background_job.total = 0;
     background_job.covers_completed = 0;
     background_job.covers_total = 0;
+    memset(&background_job.sync, 0, sizeof(background_job.sync));
+    background_job.sync.state = VP_SYNC_RUNNING;
+    background_job.sync.operation = VP_SYNC_METADATA;
+    background_job.sync.stage = VP_SYNC_PROCESSING;
+    background_job.romm_revision = romm_connection.revision;
+    background_job.integration_revision = integration_revision;
     background_job.cancel_requested = false;
     background_job.pause_requested = false;
     background_job.romm = romm_config;
@@ -1050,14 +1349,13 @@ static bool sync_cover_metadata(VpApp *app) {
         if (item->source == VP_SOURCE_ROMM && item->cover_url[0] != '\0')
             background_job.covers_total++;
     }
-    if (background_job.covers_total == 0) {
-        pthread_mutex_unlock(&background_job.mutex);
-        return false;
-    }
+    background_job.sync.total = background_job.covers_total;
     background_job.active = true;
     result = pthread_create(&background_job.thread, NULL, background_job_run, &background_job);
     if (result != 0) background_job.active = false;
     pthread_mutex_unlock(&background_job.mutex);
+    if (result != 0) sync_result_publish(&background_job);
+    else show_notification(app, "%s — iniciado", sync_job_title(VP_JOB_SYNC_COVERS));
     return result == 0;
 }
 
@@ -1066,7 +1364,7 @@ static bool sync_steamgrid_artwork(VpApp *app) {
     if (!app || !steamgrid_api_key[0] ||
         !vp_image_service_endpoint(romm_config.image_proxy_url[0]?romm_config.image_proxy_url:romm_config.base_url,
                                    "image",endpoint,sizeof(endpoint))) return false;
-    return background_job_start(VP_JOB_SYNC_STEAMGRID,NULL,NULL,NULL);
+    return request_user_job(app, VP_JOB_SYNC_STEAMGRID);
 }
 
 static void settings_text_to_wide(const char *source, SceWChar16 *destination, size_t capacity) {
@@ -1308,8 +1606,8 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
             settings_integration_active = true;
             settings_field=0;
             if (settings_integration==VP_INTEGRATION_ROMM) request_romm_check();
-            else (void)background_job_start(settings_integration==VP_INTEGRATION_STEAMGRID?
-                VP_JOB_CHECK_STEAMGRID:VP_JOB_CHECK_IMAGES,NULL,NULL,NULL);
+            else (void)request_user_job(app, settings_integration==VP_INTEGRATION_STEAMGRID?
+                VP_JOB_CHECK_STEAMGRID:VP_JOB_CHECK_IMAGES);
             vp_ui_audio_play(VP_UI_SOUND_ENTER);
         }
         return;
@@ -1322,9 +1620,8 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
             if (settings_field==0) {
                 if (!settings_start_ime()) show_notification(app,"No se pudo abrir el teclado de PS Vita");
             } else if (settings_field==1) {
-                if (!background_job_start(settings_integration==VP_INTEGRATION_STEAMGRID?
-                    VP_JOB_CHECK_STEAMGRID:VP_JOB_CHECK_IMAGES,NULL,NULL,NULL))
-                    show_notification(app,"Hay una operación en curso; reintenta en unos instantes");
+                (void)request_user_job(app, settings_integration==VP_INTEGRATION_STEAMGRID?
+                    VP_JOB_CHECK_STEAMGRID:VP_JOB_CHECK_IMAGES);
             } else if (!sync_steamgrid_artwork(app)) {
                 show_notification(app,"Configura la API key de SteamGridDB y el host de Image Service");
             }
@@ -1341,15 +1638,13 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
     }
     if (pressed & SCE_CTRL_CROSS) {
         if (settings_field == 2) {
-            if (sync_romm_catalog(app))
-                show_notification(app, "Sincronizacion de catalogo iniciada");
-            else
-                show_notification(app, "No se pudo iniciar la sincronizacion");
+            if (!sync_romm_catalog(app))
+                show_notification(app, "%s — fallido: revisa la configuración",
+                    sync_job_title(VP_JOB_SYNC_PROVIDERS));
         } else if (settings_field == 3) {
-            if (sync_cover_metadata(app))
-                show_notification(app, "Sincronizacion de metadata iniciada");
-            else
-                show_notification(app, "No se pudo iniciar metadata; revisa RomM");
+            if (!sync_cover_metadata(app))
+                show_notification(app, "%s — fallido: revisa la configuración",
+                    sync_job_title(VP_JOB_SYNC_COVERS));
         } else if (settings_field == 1 && !vp_romm_pair_code_enabled(romm_connection.state)) {
 
         } else if (!settings_start_ime()) {
@@ -1357,17 +1652,13 @@ static void handle_settings_input(VpApp *app, unsigned int pressed) {
         }
     }
     if (pressed & SCE_CTRL_TRIANGLE) {
-        if (romm_pair_code[0] != '\0' && vp_romm_pair_code_enabled(romm_connection.state)) {
-            if (background_job_start(VP_JOB_PAIR_AND_SYNC, NULL, NULL, NULL))
-                show_notification(app, "Canjeando codigo y sincronizando catalogo");
-            else
-                show_notification(app, "Hay una operacion en curso; espera a que termine");
+        if (romm_pair_code[0] != '\0') {
+            request_romm_pairing(app);
         } else if (!save_romm_config()) {
             show_notification(app, "No se pudo guardar la configuracion");
-        } else if (sync_romm_catalog(app)) {
-            show_notification(app, "Sincronizacion de catalogo iniciada");
-        } else {
-            show_notification(app, "No se pudo iniciar la sincronizacion");
+        } else if (!sync_romm_catalog(app)) {
+            show_notification(app, "%s — fallido: revisa la configuración",
+                sync_job_title(VP_JOB_SYNC_PROVIDERS));
         }
     }
 }
@@ -1740,7 +2031,8 @@ static void activate_selected(VpApp *app) {
         if (background_job_start(VP_JOB_INSTALL_HOMEBREW, item, path, NULL))
             show_notification(app, "Instalacion iniciada: %.110s", item->title);
         else
-            show_notification(app, "Hay una operacion en curso; espera a que termine");
+            show_notification(app, "%s — en curso (%s); reintenta cuando termine",
+                sync_job_title(VP_JOB_INSTALL_HOMEBREW), background_job_active_label());
         app->installation_armed = false;
         installation_armed_at = 0;
         return;
@@ -2042,9 +2334,7 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
     }
     pthread_mutex_lock(&background_job.mutex);
     frame->busy = background_job.active;
-    frame->steamgrid_syncing=background_job.active && background_job.kind==VP_JOB_SYNC_STEAMGRID;
-    frame->covers_completed=background_job.covers_completed;
-    frame->covers_total=background_job.covers_total;
+    frame->sync = sync_status_snapshot(settings_integration);
     pthread_mutex_unlock(&background_job.mutex);
     vp_ui_prepare(frame);
 }
@@ -2371,7 +2661,11 @@ static void handle_app_events(VpApp *app, bool *quit) {
             (void)pause_active_download(app, false);
             break;
         case SCE_APPMGR_SYSTEMEVENT_ON_RESUME: {
-            local_scan_pending=true;
+            bool scan_active;
+            pthread_mutex_lock(&background_job.mutex);
+            scan_active = background_job.active && background_job.kind == VP_JOB_SCAN_LOCAL;
+            pthread_mutex_unlock(&background_job.mutex);
+            if (!scan_active && !pending_user_job.active) local_scan_pending=true;
             size_t index;
             bool paused = false;
             for (index = 0; index < download_queue.count; index++) {
@@ -2439,6 +2733,8 @@ int main(void) {
         if (settings_ime_active) {
             (void)vita2d_common_dialog_update();
             settings_finish_ime(&app);
+            background_job_poll(&app);
+            if (!start_pending_user_job() && romm_pairing.active) (void)start_pending_romm_pairing();
             if (settings_ime_active) {
                 vita2d_swap_buffers();
                 continue;
@@ -2447,10 +2743,19 @@ int main(void) {
         handle_app_events(&app, &request_quit);
         if (request_quit) break;
         background_job_poll(&app);
-        if (local_scan_pending)
-            (void)background_job_start(VP_JOB_SCAN_LOCAL,NULL,NULL,NULL);
-        if (romm_check_pending)
-            (void)background_job_start(VP_JOB_VALIDATE_ROMM, NULL, NULL, NULL);
+        {
+            bool user_job_started = start_pending_user_job();
+            if (user_job_started) {
+                /* the explicit request owns the slot just released by the poll */
+            } else if (romm_pairing.active) {
+                (void)start_pending_romm_pairing();
+            } else if (!pending_user_job.active) {
+                if (local_scan_pending)
+                    (void)background_job_start(VP_JOB_SCAN_LOCAL,NULL,NULL,NULL);
+                if (romm_check_pending)
+                    (void)background_job_start(VP_JOB_VALIDATE_ROMM, NULL, NULL, NULL);
+            }
+        }
         sceCtrlPeekBufferPositive(0, &pad, 1);
         pressed = pad.buttons & ~previous;
         previous = pad.buttons;

@@ -149,6 +149,13 @@ typedef struct {
     void *context;
 } VpFetchBackend;
 
+/* Item progress, not byte progress. A zero total means it is not yet known. */
+typedef void (*VpSyncProgressFn)(size_t processed, size_t total, void *context);
+typedef struct {
+    VpSyncProgressFn execute;
+    void *context;
+} VpSyncProgressBackend;
+
 typedef bool (*VpRommPairFn)(const char *url, const char *code,
                              char *response, size_t response_capacity, void *context);
 
@@ -302,6 +309,8 @@ bool vp_romm_connection_apply(VpRommConnection *connection, unsigned long revisi
 bool vp_romm_pair_code_enabled(VpRommConnectionState state);
 bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
                   VpFetchBackend backend);
+bool vp_romm_sync_with_progress(VpCatalog *catalog, const VpRommConfig *config,
+                                VpFetchBackend backend, VpSyncProgressBackend progress);
 bool vp_cache_cover(const VpItem *item, const VpRommConfig *config, const char *destination,
                     VpCoverTransformBackend backend);
 bool vp_homebrew_import(VpCatalog *catalog, const char *json);

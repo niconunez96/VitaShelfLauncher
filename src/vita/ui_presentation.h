@@ -42,6 +42,20 @@ typedef enum {
     VP_INTEGRATION_IMAGES,
     VP_INTEGRATION_COUNT
 } VpIntegration;
+
+typedef enum { VP_SYNC_IDLE, VP_SYNC_RUNNING, VP_SYNC_SUCCEEDED, VP_SYNC_FAILED } VpSyncState;
+typedef enum { VP_SYNC_NONE, VP_SYNC_CATALOG, VP_SYNC_METADATA, VP_SYNC_STEAMGRID } VpSyncOperation;
+typedef enum { VP_SYNC_CHECKING, VP_SYNC_PROCESSING, VP_SYNC_SAVING, VP_SYNC_WAITING } VpSyncStage;
+typedef struct {
+    VpSyncState state;
+    VpSyncOperation operation;
+    VpSyncStage stage;
+    size_t processed, total, ready, missing, failed;
+    char detail[VP_TEXT];
+} VpUiSyncStatus;
+
+unsigned int vp_ui_sync_percent(const VpUiSyncStatus *status);
+void vp_ui_sync_text(const VpUiSyncStatus *status, char *text, size_t capacity);
 #define VP_UI_GRID_PAGE 10
 #define VP_UI_GRID_COLUMNS 5
 #define VP_UI_GRID_ROWS 2

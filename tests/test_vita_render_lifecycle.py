@@ -104,6 +104,38 @@ class VitaRenderLifecycleTests(unittest.TestCase):
         step = function_body("static void covers_step(")
         self.assertNotIn("background_job_start", step)
 
+    def test_ime_dialog_reaps_the_worker_and_keeps_pairing_moving(self):
+        body = function_body("int main(void)")
+        loop = body[body.index("for (;;) {") : body.index("\n    vp_ui_shutdown();")]
+        dialog = loop[loop.index("if (settings_ime_active) {") : loop.index("handle_app_events(")]
+        self.assertIn("background_job_poll(&app);", dialog)
+        self.assertIn("start_pending_romm_pairing()", dialog)
+        self.assertLess(dialog.index("background_job_poll(&app);"), dialog.index("continue;"))
+
+    def test_busy_notifications_name_the_job_holding_the_worker(self):
+        settings = function_body("static void handle_settings_input(")
+        activate = function_body("static void activate_selected")
+        queue = function_body("static bool request_user_job(VpApp *app, VpJobKind kind) {")
+        self.assertIn("request_user_job(app, settings_integration==VP_INTEGRATION_STEAMGRID?", settings)
+        self.assertIn("VP_JOB_CHECK_STEAMGRID:VP_JOB_CHECK_IMAGES", settings)
+        self.assertIn(" — en cola (", queue)
+        self.assertIn("background_job_active_label()", queue)
+        self.assertIn(" — en curso (", activate)
+        self.assertIn("background_job_active_label()", activate)
+
+    def test_explicit_sync_requests_are_queued_ahead_of_auto_scans(self):
+        body = function_body("int main(void)")
+        loop = body[body.index("for (;;) {") : body.index("\n    vp_ui_shutdown();")]
+        poll = loop.index("background_job_poll(&app);")
+        dispatch = loop.index("start_pending_user_job()")
+        auto_scan = loop.index("background_job_start(VP_JOB_SCAN_LOCAL,NULL,NULL,NULL)")
+        self.assertLess(poll, dispatch)
+        self.assertLess(dispatch, auto_scan)
+        download = function_body("static bool start_next_download(void)")
+        self.assertIn("if (pending_user_job.active)", download)
+        self.assertLess(download.index("if (pending_user_job.active)"),
+                        download.index("vp_download_queue_start_next("))
+
     def test_psp_x_launch_uses_the_bundled_plugin_without_a_bubble(self):
         activate = function_body("static void activate_selected")
         for call in ("vp_platform_is_psp", "vp_vita_psp_runtime_status",

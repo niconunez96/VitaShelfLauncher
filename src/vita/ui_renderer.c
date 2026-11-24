@@ -532,6 +532,25 @@ static const char *connection_label(VpConnectionState state, bool images) {
     return "Sin datos de conexión.";
 }
 
+static void sync_status(const VpUiFrame *f, int y) {
+    char label[128], detail[VP_TEXT];
+    const VpUiSyncStatus *status = &f->sync;
+    unsigned int percent = vp_ui_sync_percent(status);
+    unsigned int tint = status->state == VP_SYNC_FAILED ? C(245,165,151,255) : panel_primary;
+    vp_ui_sync_text(status, label, sizeof(label));
+    text(f,VP_TYPE_DESCRIPTION,316,y,584,tint,label);
+    round_rect(316,y+9,584,4,2,C(238,245,255,60));
+    if (percent) round_rect(316,y+9,584*percent/100.f,4,2,tint);
+    if (status->state == VP_SYNC_RUNNING) {
+        (void)snprintf(detail,sizeof(detail),"%u listas · %u sin coincidencia · %u fallidas",
+            (unsigned)status->ready,(unsigned)status->missing,(unsigned)status->failed);
+        if (status->operation == VP_SYNC_CATALOG)
+            (void)snprintf(detail,sizeof(detail),"Actualizando el catálogo en segundo plano.");
+        if (status->detail[0]) (void)snprintf(detail,sizeof(detail),"%s",status->detail);
+    } else (void)snprintf(detail,sizeof(detail),"%s",status->detail);
+    vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,316,y+35,584,2,panel_muted,detail);
+}
+
 static void settings(const VpUiFrame *f) {
     static const char *names[]={"Integraciones","Descargas","Apariencia","Acerca de"};
     static const char *icons[]={"ui_server","ui_download","ui_interface","ui_info"};
@@ -612,7 +631,7 @@ static void settings(const VpUiFrame *f) {
     if (section==VP_SETTINGS_INTEGRATIONS && f->settings_integration!=VP_INTEGRATION_ROMM) {
         bool images=f->settings_integration==VP_INTEGRATION_IMAGES;
         int count=images?2:3;
-        char host[VP_URL], progress[96];
+        char host[VP_URL];
         const char *configured=f->image_service_host?f->image_service_host:"";
         const char *titles[]={images?"Host":"API key","Probar conexión","Sincronizar carátulas"};
         const char *symbols[]={images?"ui_server":"ui_key","ui_sync","ui_folder"};
@@ -630,11 +649,10 @@ static void settings(const VpUiFrame *f) {
             text(f,VP_TYPE_LIST_TITLE,r.x+58,r.y+24,528,panel_primary,titles[i]);
             text(f,VP_TYPE_DESCRIPTION,r.x+58,r.y+48,528,panel_primary,values[i]);
         }
-        (void)snprintf(progress,sizeof(progress),"Preparando carátulas: %u/%u listas",
-            (unsigned)f->covers_completed,(unsigned)f->covers_total);
-        vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,316,358,584,2,panel_muted,
-            !images && f->steamgrid_syncing?progress:connection_label(images?f->image_service_state:f->steamgrid_state,images));
-        vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,316,408,584,2,panel_muted,images?
+        if (!images && f->sync.state != VP_SYNC_IDLE) sync_status(f,350);
+        else vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,316,358,584,2,panel_muted,
+            connection_label(images?f->image_service_state:f->steamgrid_state,images));
+        vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,316,435,584,2,panel_muted,images?
             "Servicio compartido por RomM y SteamGridDB. Las imágenes se guardan en la Vita.":
             "Obtén tu API key en steamgriddb.com/profile/preferences/api. Configura también Image Service.");
         return;
@@ -664,7 +682,8 @@ static void settings(const VpUiFrame *f) {
             case VP_ROMM_UNREACHABLE:status="No se pudo verificar RomM. Revisa la red y reintenta.";break;
             default:break;
         }
-        vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,316,428,584,2,panel_muted,status);
+        if (f->sync.state != VP_SYNC_IDLE) sync_status(f,414);
+        else vp_ui_paragraph(f->font,VP_TYPE_DESCRIPTION,316,428,584,2,panel_muted,status);
         return;
     }
     {

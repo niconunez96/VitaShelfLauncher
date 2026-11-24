@@ -537,7 +537,7 @@ int main(int argc,char **argv) {
         frame.romm_catalog_available=true;
         frame.grid_scroll=0;
         frame.settings_integration=VP_INTEGRATION_ROMM;
-        frame.steamgrid_syncing=false;
+        frame.sync=(VpUiSyncStatus){0};
         if (c>=1 && c<=3) { app.library_level=VP_LEVEL_ROMS; app.active_view=c==1?VP_VIEW_CAROUSEL:(c==2?VP_VIEW_LIST:VP_VIEW_GRID); }
         if (c>=4 && c<=11) {
             app.active_screen=VP_SCREEN_SETTINGS; frame.settings_detail=c!=4;
@@ -569,7 +569,8 @@ int main(int argc,char **argv) {
             frame.steamgrid_state=c==23?VP_CONNECTION_UNCONFIGURED:(c==25?VP_CONNECTION_INVALID_KEY:VP_CONNECTION_CONNECTED);
             frame.image_service_host="https://images.example.test/image";
             frame.image_service_state=c==28?VP_CONNECTION_UNREACHABLE:VP_CONNECTION_CONNECTED;
-            frame.steamgrid_syncing=c==26; frame.covers_completed=3; frame.covers_total=8;
+            if (c==26) frame.sync=(VpUiSyncStatus){.state=VP_SYNC_RUNNING,.operation=VP_SYNC_STEAMGRID,
+                .stage=VP_SYNC_PROCESSING,.processed=3,.total=8,.ready=2,.missing=1};
         }
         (void)snprintf(app.active_platform,sizeof(app.active_platform),"psx");
         frame.romm_state=c==10?VP_ROMM_UNCONFIGURED:VP_ROMM_CONNECTED;
@@ -599,7 +600,7 @@ int main(int argc,char **argv) {
             if (c<27) assert(strstr(frame_text,"API key\n") && strstr(frame_text,"Sincronizar carátulas\n") && !strstr(frame_text,"Host\n"));
             else assert(strstr(frame_text,"Host\n") && !strstr(frame_text,"API key\n") && !strstr(frame_text,"Sincronizar carátulas\n"));
             if (c==25) assert(strstr(frame_text,"API key inválida"));
-            if (c==26) assert(strstr(frame_text,"3/8 listas"));
+            if (c==26) assert(strstr(frame_text,"37% (3/8)") && strstr(frame_text,"1 sin coincidencia"));
             if (c==28) assert(strstr(frame_text,"No se pudo conectar"));
         }
         if (c>=9 && c<=11) {

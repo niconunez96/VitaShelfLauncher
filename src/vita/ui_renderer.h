@@ -27,8 +27,7 @@ typedef struct {
     bool steamgrid_configured;
     const char *image_service_host;
     VpConnectionState steamgrid_state, image_service_state;
-    bool steamgrid_syncing;
-    size_t covers_completed, covers_total;
+    VpUiSyncStatus sync;
     VpUiPreferences preferences;
     const char *app_version;
     bool romm_catalog_available;

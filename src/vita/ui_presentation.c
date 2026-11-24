@@ -3,8 +3,37 @@
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+unsigned int vp_ui_sync_percent(const VpUiSyncStatus *status) {
+    size_t processed;
+    unsigned int percent;
+    if (status->state == VP_SYNC_SUCCEEDED) return 100;
+    if (!status->total) return 0;
+    processed = status->processed < status->total ? status->processed : status->total;
+    percent = (unsigned int)(100.0 * processed / status->total);
+    /* Completion includes publication/cache writes, not only the last request. */
+    return status->state == VP_SYNC_RUNNING && percent == 100 ? 99 : percent;
+}
+
+void vp_ui_sync_text(const VpUiSyncStatus *status, char *text, size_t capacity) {
+    const char *title = status->operation == VP_SYNC_CATALOG ? "RomM: catálogo" :
+        status->operation == VP_SYNC_METADATA ? "RomM: metadata" :
+        status->operation == VP_SYNC_STEAMGRID ? "SteamGridDB: carátulas" : "Sincronización";
+    const char *state = status->state == VP_SYNC_SUCCEEDED ? "completado" :
+        status->state == VP_SYNC_FAILED ? "fallido" :
+        status->stage == VP_SYNC_WAITING ? "en cola" :
+        status->stage == VP_SYNC_CHECKING ? "conectando" :
+        status->stage == VP_SYNC_SAVING ? "guardando" : "sincronizando";
+    if (status->total || status->state == VP_SYNC_SUCCEEDED)
+        (void)snprintf(text, capacity, "%s · %s · %u%% (%u/%u)", title, state,
+            vp_ui_sync_percent(status), (unsigned)status->processed, (unsigned)status->total);
+    else
+        (void)snprintf(text, capacity, "%s · %s · %u procesados", title, state,
+            (unsigned)status->processed);
+}
 
 static int same(const char *a, const char *b) {
     if (a == NULL) return 0;

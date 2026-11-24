@@ -89,8 +89,13 @@ class VitaAppEventPollingTests(unittest.TestCase):
         cls.probe = pathlib.Path(scratch.name) / "app_events"
         prefix = r'''
 #include "vitashelflauncher.h"
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+typedef enum { VP_JOB_SCAN_LOCAL } VpProbeJobKind;
+static struct { pthread_mutex_t mutex; bool active; VpProbeJobKind kind; } background_job =
+    { .mutex = PTHREAD_MUTEX_INITIALIZER };
+static struct { bool active; } pending_user_job;
 typedef struct { int systemEvent; } SceAppMgrSystemEvent;
 enum { SCE_APPMGR_SYSTEMEVENT_ON_DEACTIVATE = 1,
        SCE_APPMGR_SYSTEMEVENT_ON_RESUME = 2,

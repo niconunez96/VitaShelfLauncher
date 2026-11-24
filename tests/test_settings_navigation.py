@@ -195,7 +195,8 @@ enum { SCE_CTRL_UP=1, SCE_CTRL_DOWN=2, SCE_CTRL_CROSS=4, SCE_CTRL_CIRCLE=8,
        SCE_CTRL_SQUARE=16, SCE_CTRL_TRIANGLE=32, SCE_CTRL_LEFT=64, SCE_CTRL_RIGHT=128,
        SCE_CTRL_SELECT=256 };
 enum { VP_UI_SOUND_NAVIGATION, VP_UI_SOUND_ENTER, VP_UI_SOUND_BACK, VP_UI_SOUND_TAB,
-       VP_JOB_DOWNLOAD_ROM, VP_JOB_PAIR_AND_SYNC, VP_JOB_CHECK_STEAMGRID, VP_JOB_CHECK_IMAGES };
+       VP_JOB_DOWNLOAD_ROM, VP_JOB_PAIR_AND_SYNC, VP_JOB_CHECK_STEAMGRID, VP_JOB_CHECK_IMAGES,
+       VP_JOB_SYNC_PROVIDERS, VP_JOB_SYNC_COVERS, VP_JOB_SYNC_STEAMGRID };
 static int settings_section, settings_field, checks, syncs;
 static int settings_integration, last_job, artwork_syncs;
 static size_t download_selection;
@@ -226,15 +227,17 @@ static void vp_ui_audio_play(int sound) { (void)sound; }
 static void refresh_catalog_view_cache(VpApp *value) { (void)value; }
 static void request_romm_check(void) { checks++; }
 static void show_notification(VpApp *app, const char *format, ...) { (void)app; (void)format; }
+static const char *sync_job_title(int kind) { (void)kind; return "Sync"; }
+static bool request_user_job(VpApp *app, int kind) {
+    (void)app; (void)kind; last_job=kind; return true;
+}
 static bool start_next_download(void) { return false; }
 static bool sync_romm_catalog(VpApp *app) { (void)app; syncs++; return true; }
 static bool sync_cover_metadata(VpApp *app) { (void)app; return true; }
 static bool sync_steamgrid_artwork(VpApp *app) { (void)app; artwork_syncs++; return true; }
 static bool settings_start_ime(void) { return true; }
 static bool save_romm_config(void) { saves++; return save_ok; }
-static bool background_job_start(int kind, const void *a, const void *b, const void *c) {
-    last_job=kind; (void)a; (void)b; (void)c; return true;
-}
+static void request_romm_pairing(VpApp *app) { (void)app;last_job=VP_JOB_PAIR_AND_SYNC; }
 '''
         suffix = r'''
 int main(void) {
@@ -250,6 +253,14 @@ int main(void) {
     assert(syncs==0 && !settings_integration_active);
     handle_settings_input(&app,SCE_CTRL_CROSS);
     assert(settings_integration_active && checks==1);
+    romm_connection.state=VP_ROMM_INVALID_TOKEN;
+    strcpy(romm_pair_code,"PAIR1234");
+    handle_settings_input(&app,SCE_CTRL_TRIANGLE);
+    assert(last_job==VP_JOB_PAIR_AND_SYNC);
+    romm_connection.state=VP_ROMM_CHECKING;
+    handle_settings_input(&app,SCE_CTRL_TRIANGLE);
+    assert(last_job==VP_JOB_PAIR_AND_SYNC && syncs==0);
+    romm_pair_code[0]='\0';
     handle_settings_input(&app,SCE_CTRL_DOWN);
     handle_settings_input(&app,SCE_CTRL_DOWN);
     assert(settings_field==2);

@@ -32,6 +32,7 @@ static VpConnectionState image_service_state,steamgrid_state;
 static bool cover_cache_dirty;
 static int notifications;
 static bool start_next_download(void) { return false; }
+static const char *sync_job_title(int kind) {(void)kind;return "Sync";}
 static void show_notification(VpApp *app,const char *format,...) { (void)app;(void)format;notifications++; }
 static void publish(VpApp *app,int kind) {
     bool succeeded=true;

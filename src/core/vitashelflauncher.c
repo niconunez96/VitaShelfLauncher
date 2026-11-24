@@ -1473,13 +1473,29 @@ bool vp_romm_pair_code_enabled(VpRommConnectionState state) {
     return state != VP_ROMM_CONNECTED && state != VP_ROMM_CHECKING;
 }
 
+static void vp_romm_sync_import_count(size_t processed, size_t total, void *context) {
+    (void)total;
+    *(size_t *)context = processed;
+}
+
 bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
                   VpFetchBackend backend) {
+    size_t imported = 0;
+    VpSyncProgressBackend progress = {vp_romm_sync_import_count, &imported};
+    if (!vp_romm_sync_with_progress(catalog, config, backend, progress)) return false;
+    return imported > 0;
+}
+
+bool vp_romm_sync_with_progress(VpCatalog *catalog, const VpRommConfig *config,
+                                VpFetchBackend backend, VpSyncProgressBackend progress) {
     char url[VP_URL];
     size_t offset;
-    bool imported = false;
+    size_t processed = 0;
+    size_t capacity;
     if (catalog == NULL || config == NULL || config->base_url[0] == '\0' ||
         config->token[0] == '\0' || backend.execute == NULL) return false;
+    capacity = VP_MAX_ITEMS - catalog->count;
+    if (progress.execute != NULL) progress.execute(0, 0, progress.context);
     for (offset = 0; offset < VP_MAX_ITEMS && catalog->count < VP_MAX_ITEMS; offset++) {
         char path[VP_URL];
         char total_text[32];
@@ -1493,14 +1509,19 @@ bool vp_romm_sync(VpCatalog *catalog, const VpRommConfig *config,
         if (!vp_join_url(url, sizeof(url), config->base_url, path)) return false;
         if (!backend.execute(url, config->token, vp_fetch_response, sizeof(vp_fetch_response), backend.context)) return false;
         if (!vp_romm_import_page(catalog, vp_fetch_response, &page_items)) return false;
-        imported = imported || page_items > 0;
+        processed += page_items;
         vp_romm_normalize_urls(catalog, config->base_url);
-        if (page_items == 0) break;
         if (vp_json_value(vp_fetch_response, vp_object_end(vp_fetch_response), "total", total_text, sizeof(total_text)))
             total = strtoul(total_text, NULL, 10);
+        if (progress.execute != NULL) {
+            size_t effective_total = total > capacity ? capacity : (size_t)total;
+            if (effective_total && effective_total < processed) effective_total = processed;
+            progress.execute(processed, effective_total, progress.context);
+        }
+        if (page_items == 0) break;
         if (total > 0 && offset + 1 >= total) break;
     }
-    return imported;
+    return true;
 }
 
 static const char *vp_romm_token_for_url(const VpItem *item, const VpRommConfig *config,

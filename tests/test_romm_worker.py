@@ -29,21 +29,31 @@ class RommWorkerTests(unittest.TestCase):
             adapter = source[start:source.index("\n}", start) + 2]
         prefix = r'''
 #include "vitashelflauncher.h"
+#include "ui_presentation.h"
+#include <pthread.h>
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 enum {VP_JOB_VALIDATE_ROMM, VP_JOB_SYNC_PROVIDERS, VP_JOB_PAIR_AND_SYNC,
       VP_JOB_SYNC_COVERS, VP_JOB_DOWNLOAD_ROM};
-typedef struct {VpCatalog catalog; VpRommConnectionState romm_state; bool token_exchanged;} Job;
-static Job storage;
+typedef struct {
+    VpCatalog catalog; VpRommConnectionState romm_state; bool token_exchanged;
+    pthread_mutex_t mutex; VpUiSyncStatus sync; bool succeeded;
+} Job;
+static Job storage={.mutex=PTHREAD_MUTEX_INITIALIZER};
+#define background_job storage
+static void sync_progress(size_t n,size_t total,void *context) {(void)n;(void)total;(void)context;}
+static void sync_result_publish(Job *job) {(void)job;}
 static VpRommConfig romm_config, saved;
 static VpRommConnection romm_connection;
 static char romm_pair_code[VP_TEXT];
 static VpApp application;
 static int saves, requests;
+static bool cache_ok=true;
 static long catalog_status;
 static const char *vp_vita_last_error(void) {return "catalog failure";}
+static void vp_vita_set_error(const char *error) {(void)error;}
 static long vp_vita_probe_romm(const char *u,const char *t,char *r,size_t n,void *c) {
     (void)u;(void)t;(void)c;
     snprintf(r,n,"{\"items\":[],\"total\":0}");
@@ -55,9 +65,10 @@ static bool vp_vita_fetch(const char *u,const char *t,char *r,size_t n,void *c) 
 static bool vp_vita_exchange_pair_code(const char *u,const char *t,char *r,size_t n,void *c) {
     (void)u;(void)t;(void)c;snprintf(r,n,"{\"raw_token\":\"new-token\"}");return true;
 }
-static bool save_catalog_cache(const VpCatalog *c,const VpRommConfig *r) {(void)c;(void)r;return true;}
+static bool save_catalog_cache(const VpCatalog *c,const VpRommConfig *r) {(void)c;(void)r;return cache_ok;}
 static bool save_romm_config(void) {saved=romm_config;saves++;return true;}
 static bool start_next_download(void) {return false;}
+static const char *sync_job_title(int kind) {(void)kind;return "RomM: catálogo";}
 static void show_notification(VpApp *app,const char *format, ...) {
     va_list arguments; va_start(arguments,format);
     vsnprintf(app->notice,sizeof(app->notice),format,arguments);
@@ -111,6 +122,9 @@ int main(void) {
     run(VP_JOB_PAIR_AND_SYNC,stale);
     assert(saves==1 && memcmp(&before,&romm_config,sizeof(before))==0);
     assert(romm_connection.state==VP_ROMM_CHECKING);
+    catalog_status=200;cache_ok=false;
+    run(VP_JOB_SYNC_PROVIDERS,romm_connection.revision);
+    assert(strstr(application.notice,"RomM: catálogo — fallido"));
     puts("RomM worker rejection, persistence and stale-result probes: PASS");
     return 0;
 }
@@ -121,8 +135,8 @@ int main(void) {
             probe.write_text(prefix + adapter + run + worker + finish + poll + cases)
             subprocess.run(shlex.split(os.environ.get("CC", "cc")) + [
                 "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
-                "-I" + str(ROOT / "include"), str(ROOT / "src/core/vitashelflauncher.c"),
-                str(probe), "-o", str(binary)], check=True)
+                "-I" + str(ROOT / "include"), "-I" + str(ROOT / "src/vita"), str(ROOT / "src/core/vitashelflauncher.c"),
+                str(probe), "-pthread", "-o", str(binary)], check=True)
             subprocess.run([str(binary)], check=True, cwd=directory)
 
 
