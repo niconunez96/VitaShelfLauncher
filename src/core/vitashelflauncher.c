@@ -559,6 +559,33 @@ static void vp_append_download_id(const VpItem *item, char *destination,
     if (*used == 0) vp_append_download_slug("item", false, destination, capacity, used);
 }
 
+/* Arcade sets are identified by their original zip name, not by the display title. */
+static void vp_append_arcade_name(const VpItem *item, char *destination, size_t capacity) {
+    const char *name;
+    const char *cursor;
+    const char *end;
+    const char *dot = NULL;
+    size_t used = 0;
+    if (item == NULL || item->fs_name[0] == '\0' || destination == NULL || capacity == 0) return;
+    name = item->fs_name;
+    for (cursor = name; *cursor != '\0'; cursor++)
+        if (*cursor == '/' || *cursor == '\\') name = cursor + 1;
+    end = name;
+    while (*end != '\0') end++;
+    for (cursor = name; cursor < end; cursor++)
+        if (*cursor == '.') dot = cursor;
+    if (dot == NULL) dot = end;
+    for (cursor = name; cursor < dot; cursor++) {
+        unsigned char value = (unsigned char)*cursor;
+        if (!isalnum(value) && value != '-' && value != '_') continue;
+        if (used + 1 >= capacity) return;
+        destination[used++] = (char)value;
+    }
+    if (used == 0 || (used == 1 && destination[0] == '.') ||
+        (used == 2 && destination[0] == '.' && destination[1] == '.')) return;
+    destination[used] = '\0';
+}
+
 static void vp_item_download_basename(const VpItem *item, char *destination, size_t capacity) {
     size_t used = 0;
     size_t id_start;
@@ -567,6 +594,10 @@ static void vp_item_download_basename(const VpItem *item, char *destination, siz
     size_t id_used = 0;
     if (destination == NULL || capacity == 0) return;
     destination[0] = '\0';
+    if (item != NULL && vp_platform_is_arcade(item->platform) && item->fs_name[0] != '\0') {
+        vp_append_arcade_name(item, destination, capacity);
+        if (destination[0] != '\0') return;
+    }
     id_buffer[0] = '\0';
     vp_append_download_id(item, id_buffer, sizeof(id_buffer), &id_used);
     id_buffer[id_used] = '\0';
@@ -669,6 +700,19 @@ bool vp_platform_is_psp(const char *platform) {
            vp_compare_ci(platform, "playstation portable") == 0;
 }
 
+bool vp_platform_is_arcade(const char *platform) {
+    static const char *const slugs[] = {
+        "arcade", "neogeo", "neo-geo", "mame", "mame-advmame", "advmame",
+        "fbneo", "fba", "finalburn", "cps", "cps1", "cps2", "cps3",
+        "naomi", "atomiswave", "triforce"
+    };
+    size_t index;
+    if (platform == NULL) return false;
+    for (index = 0; index < sizeof(slugs) / sizeof(slugs[0]); index++)
+        if (vp_compare_ci(platform, slugs[index]) == 0) return true;
+    return false;
+}
+
 bool vp_item_psp_image_path(const VpItem *item, const char *psp_root,
                             const char *extension, char *destination, size_t capacity) {
     char basename[VP_TEXT];
@@ -727,14 +771,48 @@ static const VpDefaultLaunchProfile vp_default_launch_profiles[] = {
     {"gamegear", "app0:/genesis_plus_gx_libretro.self"},
     {"psx", "app0:/pcsx_rearmed_libretro.self"},
     {"playstation", "app0:/pcsx_rearmed_libretro.self"},
-    {"arcade", "app0:/fbneo_libretro.self"},
-    {"neogeo", "app0:/fbneo_libretro.self"},
+    {"arcade", VP_ARCADE_DEFAULT_CORE},
+    {"neogeo", VP_ARCADE_DEFAULT_CORE},
     {"pce", "app0:/mednafen_pce_fast_libretro.self"},
     {"pc-engine", "app0:/mednafen_pce_fast_libretro.self"},
     {"turbografx-16", "app0:/mednafen_pce_fast_libretro.self"},
     {"atari2600", "app0:/stella2014_libretro.self"},
     {"wonderswan", "app0:/mednafen_wswan_libretro.self"}
 };
+
+/* Cores bundled by RetroArch Vita. The set/core version match is a user decision. */
+static const VpArcadeCore vp_arcade_cores[] = {
+    {"auto", ""},
+    {"fbneo", VP_ARCADE_DEFAULT_CORE},
+    {"fbalpha", "app0:/fbalpha_libretro.self"},
+    {"fbalpha2012", "app0:/fbalpha2012_libretro.self"},
+    {"fbalpha2012-cps1", "app0:/fbalpha2012_cps1_libretro.self"},
+    {"fbalpha2012-cps2", "app0:/fbalpha2012_cps2_libretro.self"},
+    {"fbalpha2012-neogeo", "app0:/fbalpha2012_neo_libretro.self"},
+    {"mame2000", "app0:/mame2000_libretro.self"},
+    {"mame2003", "app0:/mame2003_libretro.self"},
+    {"mame2003plus", "app0:/mame2003plus_libretro.self"}
+};
+
+size_t vp_arcade_core_count(void) {
+    return sizeof(vp_arcade_cores) / sizeof(vp_arcade_cores[0]);
+}
+
+const VpArcadeCore *vp_arcade_core(size_t index) {
+    return index < vp_arcade_core_count() ? &vp_arcade_cores[index] : NULL;
+}
+
+const char *vp_platform_default_core(const char *platform) {
+    size_t index;
+    if (platform == NULL) return NULL;
+    for (index = 0;
+         index < sizeof(vp_default_launch_profiles) / sizeof(vp_default_launch_profiles[0]);
+         index++) {
+        if (vp_compare_ci(platform, vp_default_launch_profiles[index].platform) == 0)
+            return vp_default_launch_profiles[index].core;
+    }
+    return vp_platform_is_arcade(platform) ? VP_ARCADE_DEFAULT_CORE : NULL;
+}
 
 static bool vp_valid_titleid(const char *titleid) {
     const char *cursor;
@@ -806,6 +884,40 @@ bool vp_launch_config_set(VpLaunchConfig *config, const char *platform, const ch
         return true;
     }
     return vp_launch_profile_append(config, platform, titleid, core);
+}
+
+bool vp_launch_config_remove(VpLaunchConfig *config, const char *platform) {
+    size_t index;
+    if (config == NULL || platform == NULL || platform[0] == '\0') return false;
+    for (index = 0; index < config->count; index++) {
+        if (vp_compare_ci(config->profiles[index].platform, platform) != 0) continue;
+        if (index + 1 < config->count) {
+            memmove(&config->profiles[index], &config->profiles[index + 1],
+                    (config->count - index - 1) * sizeof(config->profiles[index]));
+        }
+        config->count--;
+        memset(&config->profiles[config->count], 0, sizeof(config->profiles[config->count]));
+        return true;
+    }
+    return false;
+}
+
+bool vp_rom_launch_key(const VpItem *item, char *destination, size_t capacity) {
+    const char *source;
+    size_t used = 4;
+    if (item == NULL || destination == NULL || capacity < 6) return false;
+    source = item->remote_id[0] != '\0' ? item->remote_id : item->id;
+    if (source[0] == '\0') return false;
+    memcpy(destination, "rom.", used);
+    for (; *source != '\0'; source++) {
+        unsigned char value = (unsigned char)*source;
+        if (!isalnum(value) && value != '-' && value != '_') continue;
+        if (used + 1 >= capacity) return false;
+        destination[used++] = (char)value;
+    }
+    if (used == 4) return false;
+    destination[used] = '\0';
+    return true;
 }
 
 bool vp_build_launch_uri(const VpLaunchProfile *profile, const char *rom_path,

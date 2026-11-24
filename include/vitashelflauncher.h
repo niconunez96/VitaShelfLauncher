@@ -13,7 +13,8 @@
 #define VP_URL 384
 #define VP_PATH 256
 #define VP_MAX_QUERY 80
-#define VP_MAX_LAUNCH_PROFILES 32
+#define VP_MAX_LAUNCH_PROFILES 96
+#define VP_ARCADE_DEFAULT_CORE "app0:/fbneo_libretro.self"
 #define VP_LAUNCH_URI 768
 #define VP_DOWNLOAD_EXTENSION 16
 #define VP_MAX_DOWNLOAD_QUEUE 16
@@ -203,6 +204,12 @@ typedef struct {
     char core[VP_PATH];
 } VpLaunchProfile;
 
+/* A core available for arcade ROMs. The empty core path means "no override". */
+typedef struct {
+    const char *id;
+    const char *core;
+} VpArcadeCore;
+
 typedef struct {
     VpLaunchProfile profiles[VP_MAX_LAUNCH_PROFILES];
     size_t count;
@@ -277,8 +284,14 @@ const char *vp_source_name(VpSource source);
 
 void vp_launch_config_init(VpLaunchConfig *config);
 bool vp_launch_config_set(VpLaunchConfig *config, const char *platform, const char *value);
+bool vp_launch_config_remove(VpLaunchConfig *config, const char *platform);
 const VpLaunchProfile *vp_launch_config_find(const VpLaunchConfig *config,
                                              const char *platform);
+bool vp_platform_is_arcade(const char *platform);
+size_t vp_arcade_core_count(void);
+const VpArcadeCore *vp_arcade_core(size_t index);
+const char *vp_platform_default_core(const char *platform);
+bool vp_rom_launch_key(const VpItem *item, char *destination, size_t capacity);
 bool vp_item_extension(const VpItem *item, char *destination, size_t capacity);
 bool vp_item_download_path(const VpItem *item, const char *directory,
                            char *destination, size_t capacity);

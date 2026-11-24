@@ -568,6 +568,32 @@ static void test_download_paths(void) {
     (void)snprintf(item.remote_id, sizeof(item.remote_id), "%s", "45");
     assert(vp_item_download_path(&item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)));
     assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/snes/metroid_45.zip") == 0);
+
+    /* Arcade ROMs must keep their original set filename (tmnt2.zip). */
+    (void)snprintf(item.id, sizeof(item.id), "%s", "romm:42");
+    (void)snprintf(item.remote_id, sizeof(item.remote_id), "%s", "42");
+    (void)snprintf(item.title, sizeof(item.title), "%s", "Teenage Mutant Ninja Turtles 2");
+    (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "tmnt2.zip");
+    (void)snprintf(item.platform, sizeof(item.platform), "%s", "arcade");
+    assert(vp_item_download_path(&item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/arcade/tmnt2.zip") == 0);
+    (void)snprintf(item.platform, sizeof(item.platform), "%s", "neogeo");
+    (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "mslug.zip");
+    assert(vp_item_download_path(&item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/neogeo/mslug.zip") == 0);
+    (void)snprintf(item.platform, sizeof(item.platform), "%s", "mame-advmame");
+    (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "pacman.zip");
+    assert(vp_item_download_path(&item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/mame-advmame/pacman.zip") == 0);
+    /* Path separators and traversal segments in the supplied name are ignored. */
+    (void)snprintf(item.platform, sizeof(item.platform), "%s", "arcade");
+    (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "../../etc/passwd.zip");
+    assert(vp_item_download_path(&item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/arcade/passwd.zip") == 0);
+    assert(vp_platform_is_arcade("arcade") && vp_platform_is_arcade("neogeo"));
+    assert(vp_platform_is_arcade("mame") && vp_platform_is_arcade("fbneo"));
+    assert(vp_platform_is_arcade("CPS2") && !vp_platform_is_arcade("snes"));
+    assert(!vp_platform_is_arcade("Mega Drive / Genesis") && !vp_platform_is_arcade(NULL));
 }
 
 static void test_launch_profiles(void) {
@@ -599,6 +625,29 @@ static void test_launch_profiles(void) {
     assert(vp_launch_config_find(&config, "unknown-platform") == NULL);
     assert(!vp_launch_config_set(&config, "snes", ""));
     assert(!vp_build_launch_uri(profile, "ux0:data/vitashelflauncher/downloads/nds/metroid_7.nds", uri, 16));
+
+    /* Arcade cores are offered locally; the Auto entry clears the per-ROM override. */
+    assert(vp_arcade_core_count() > 1);
+    assert(vp_arcade_core(0) != NULL && vp_arcade_core(0)->core[0] == '\0');
+    assert(vp_arcade_core(1) != NULL &&
+           strcmp(vp_arcade_core(1)->core, VP_ARCADE_DEFAULT_CORE) == 0);
+    {
+        VpItem rom;
+        char key[VP_TEXT];
+        memset(&rom, 0, sizeof(rom));
+        (void)snprintf(rom.id, sizeof(rom.id), "%s", "romm:42");
+        (void)snprintf(rom.remote_id, sizeof(rom.remote_id), "%s", "42");
+        assert(vp_rom_launch_key(&rom, key, sizeof(key)) && strcmp(key, "rom.42") == 0);
+        assert(vp_launch_config_set(&config, key, "RETROVITA:app0:/mame2000_libretro.self"));
+        profile = vp_launch_config_find(&config, key);
+        assert(profile != NULL && strcmp(profile->core, "app0:/mame2000_libretro.self") == 0);
+        assert(vp_build_launch_uri(profile, "ux0:data/vitashelflauncher/downloads/arcade/tmnt2.zip",
+                                   uri, sizeof(uri)));
+        assert(strstr(uri, "param=app0:/mame2000_libretro.self") != NULL);
+        assert(vp_launch_config_remove(&config, key));
+        assert(vp_launch_config_find(&config, key) == NULL);
+        assert(!vp_launch_config_remove(&config, key));
+    }
 }
 
 static void test_romm_content_download(void) {
