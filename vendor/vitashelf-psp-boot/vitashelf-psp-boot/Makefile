@@ -1,8 +1,8 @@
 # VitaShelf Launcher boot plugin for Adrenaline, derived from Pocket Shelf's
 # MIT-licensed psp-boot source (see README.md). Built with the pspdev toolchain;
 # scripts/build-psp-plugin.sh copies the result to
-# assets/psp/vitashelflauncher_pspboot.prx for the VPK.
-TARGET = vitashelflauncher_pspboot
+# assets/bin/psp/vitashelf.prx for the VPK.
+TARGET = vitashelf
 OBJS = main.o
 
 BUILD_PRX = 1

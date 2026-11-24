@@ -165,11 +165,11 @@
   },
   {
     "file": "ui/ui_romm.png",
-    "source": "assets/aurora/ui_icons/ui_romm.png",
+    "source": "ui/ui_romm.png",
     "upstream": "https://github.com/rommapp/romm/tree/master/frontend/assets",
     "upstream_git_blob": "491e995d35661dbdc4f87cd2960f2ff87a336cf5",
     "sha256_source": "96ada33571774e08b7cf9a0c66f41e35dc04d5b79d7f8d703da1a3993e0ab8ae",
-    "treatment": "Unchanged previously accepted circular RomM PNG."
+    "treatment": "Bundled previously accepted circular RomM PNG, unchanged."
   },
   {
     "file": "ui/ui_buttons.png",

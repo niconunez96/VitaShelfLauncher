@@ -47,13 +47,14 @@ def png_svg(data, target, size):
 
 
 def controls_assets():
-    """Bake classic dark face buttons into one atlas; preserve the old RomM PNG."""
+    """Bake classic dark face buttons into one atlas; preserve the bundled RomM PNG."""
     (OUT / "ui").mkdir(parents=True,exist_ok=True)
     (OUT / "sources").mkdir(parents=True,exist_ok=True)
-    original=ROOT / "assets/aurora"
-    (OUT / "ui/ui_romm.png").write_bytes((original / "ui_icons/ui_romm.png").read_bytes())
+    romm_png = OUT / "ui/ui_romm.png"
+    romm_bytes = romm_png.read_bytes()
     for name in ("romm-isotipo.svg","RomM-AGPL-3.0.txt"):
-        (OUT / "sources" / name).write_bytes((original / "licenses" / name).read_bytes())
+        if not (OUT / "sources" / name).is_file():
+            raise SystemExit(f"missing bundled RomM source: sources/{name}")
     buttons=[
         ("cross","#91a4ed",'<path d="m17 16 30 30m0-30-30 30"/>'),
         ("circle","#f36b6a",'<circle cx="32" cy="31" r="16.5"/>'),
@@ -90,11 +91,11 @@ def controls_assets():
     provenance=json.loads(manifest.read_text()) if manifest.exists() else []
     provenance=[entry for entry in provenance if entry["file"] not in ("ui/ui_romm.png","ui/ui_buttons.png")]
     provenance.extend([
-        {"file":"ui/ui_romm.png","source":"assets/aurora/ui_icons/ui_romm.png",
+        {"file":"ui/ui_romm.png","source":"ui/ui_romm.png",
          "upstream":"https://github.com/rommapp/romm/tree/master/frontend/assets",
          "upstream_git_blob":"491e995d35661dbdc4f87cd2960f2ff87a336cf5",
-         "sha256_source":hashlib.sha256((original / "ui_icons/ui_romm.png").read_bytes()).hexdigest(),
-         "treatment":"Unchanged previously accepted circular RomM PNG."},
+         "sha256_source":hashlib.sha256(romm_bytes).hexdigest(),
+         "treatment":"Bundled previously accepted circular RomM PNG, unchanged."},
         {"file":"ui/ui_buttons.png","source":[f"sources/button-{name}.svg" for name,_,_ in buttons],
          "treatment":"Original DualShock-style vector recreations, rasterized with supersampling into four 64x64 atlas cells."},
     ])
