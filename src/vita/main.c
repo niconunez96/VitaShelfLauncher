@@ -51,6 +51,8 @@
 #define VP_LIBRARY_PREFERENCES_PARTIAL "ux0:data/vitashelflauncher/library.ini.part"
 #define VP_LIBRARY_PREFERENCES_LINE 1024
 #define VP_ARTWORK_CACHE "ux0:data/vitashelflauncher/cache/covers"
+#define VP_DOWNLOAD_ROOT "ux0:data/vitashelflauncher/downloads"
+#define VP_PSP_ISO_ROOT "ux0:pspemu/ISO"
 #define VP_TOUCH_WIDTH 1920
 #define VP_TOUCH_HEIGHT 1088
 #define VP_TOUCH_TAP_SLOP 32
@@ -133,6 +135,7 @@ typedef struct {
     VpCatalog catalog;
     char destination[VP_PATH];
     char partial[VP_PATH + 8];
+    char resolved_target[VP_PATH];
     char pair_code[VP_TEXT];
     char error[VP_TEXT];
     unsigned long long downloaded;
@@ -482,6 +485,16 @@ static bool cached_cover_valid(const char *path) {
     return vp_safe_cover_png(header,size);
 }
 
+static bool installed_item_path(const VpItem *item, char *path, size_t capacity) {
+    if (vp_platform_is_psp(item->platform)) {
+        if (vp_item_psp_image_path(item, VP_PSP_ISO_ROOT, "iso", path, capacity) && file_exists(path))
+            return true;
+        return vp_item_psp_image_path(item, VP_PSP_ISO_ROOT, "cso", path, capacity) &&
+               file_exists(path);
+    }
+    return vp_item_download_path(item, VP_DOWNLOAD_ROOT, path, capacity) && file_exists(path);
+}
+
 static void refresh_downloaded_items(VpApp *app) {
     size_t index;
     if (app == NULL) return;
@@ -489,9 +502,7 @@ static void refresh_downloaded_items(VpApp *app) {
         VpItem *item = &app->catalog.items[index];
         char path[VP_PATH];
         if (item->source != VP_SOURCE_ROMM) continue;
-        if (item->multi_file ||
-            !vp_item_download_path(item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path)) ||
-            !file_exists(path)) {
+        if (item->multi_file || !installed_item_path(item, path, sizeof(path))) {
             item->installed = false;
             item->launch_target[0] = '\0';
             continue;
@@ -536,6 +547,7 @@ static void *background_job_run(void *context) {
     char pair_code[VP_TEXT];
     char destination[VP_PATH];
     char partial[VP_PATH + 8];
+    char resolved[VP_PATH];
     bool succeeded = false;
     bool romm_requested = false;
     bool homebrew_requested = false;
@@ -551,6 +563,8 @@ static void *background_job_run(void *context) {
     item = job->item;
     (void)snprintf(destination, sizeof(destination), "%s", job->destination);
     (void)snprintf(partial, sizeof(partial), "%s", job->partial);
+    (void)snprintf(resolved, sizeof(resolved), "%s", job->resolved_target[0] != '\0'
+                                                        ? job->resolved_target : job->destination);
     (void)snprintf(pair_code, sizeof(pair_code), "%s", job->pair_code);
     pthread_mutex_unlock(&job->mutex);
 
@@ -674,6 +688,15 @@ static void *background_job_run(void *context) {
             succeeded = sceIoRename(partial, destination) >= 0;
             if (!succeeded) (void)sceIoRemove(partial);
         }
+        if (succeeded && kind == VP_JOB_DOWNLOAD_ROM && vp_platform_is_psp(item.platform)) {
+            char extension[VP_DOWNLOAD_EXTENSION];
+            if (vp_item_extension(&item, extension, sizeof(extension)) &&
+                strcmp(extension, "zip") == 0) {
+                succeeded = vp_vita_extract_psp_archive(&item, destination, VP_PSP_ISO_ROOT,
+                                                         resolved, sizeof(resolved));
+                if (!succeeded) (void)sceIoRemove(destination);
+            }
+        }
     }
 finish:
     (void)snprintf(error, sizeof(error), "%s", succeeded ? "" : vp_vita_last_error());
@@ -684,6 +707,7 @@ finish:
         job->romm = config;
     }
     job->succeeded = succeeded;
+    (void)snprintf(job->resolved_target, sizeof(job->resolved_target), "%s", resolved);
     (void)snprintf(job->error, sizeof(job->error), "%s", error);
     job->completed = true;
     pthread_mutex_unlock(&job->mutex);
@@ -729,6 +753,7 @@ static bool background_job_start(VpJobKind kind, const VpItem *item, const char 
                    destination != NULL ? destination : "");
     (void)snprintf(background_job.partial, sizeof(background_job.partial), "%s",
                    partial != NULL ? partial : "");
+    background_job.resolved_target[0] = '\0';
     background_job.active = true;
     result = pthread_create(&background_job.thread, NULL, background_job_run, &background_job);
     if (result != 0) background_job.active = false;
@@ -812,6 +837,7 @@ static void background_job_poll(VpApp *app) {
     VpItem item;
     VpRommConfig config;
     char destination[VP_PATH];
+    char resolved[VP_PATH];
     char error[VP_TEXT];
     bool succeeded;
     bool canceled;
@@ -832,6 +858,9 @@ static void background_job_poll(VpApp *app) {
     item = background_job.item;
     config = background_job.romm;
     (void)snprintf(destination, sizeof(destination), "%s", background_job.destination);
+    (void)snprintf(resolved, sizeof(resolved), "%s", background_job.resolved_target[0] != '\0'
+                                                         ? background_job.resolved_target
+                                                         : background_job.destination);
     (void)snprintf(error, sizeof(error), "%s", background_job.error);
     canceled = background_job.cancel_requested;
     paused = background_job.pause_requested;
@@ -970,7 +999,7 @@ static void background_job_poll(VpApp *app) {
             completed->installed = true;
             catalog_view_cache_dirty = true;
             (void)snprintf(completed->launch_target, sizeof(completed->launch_target), "%s",
-                           destination);
+                           resolved);
         }
         show_notification(app, "Descarga finalizada: %.120s", item.title);
         vp_ui_audio_play(VP_UI_SOUND_DOWNLOAD_COMPLETE);
@@ -1716,6 +1745,52 @@ static void activate_selected(VpApp *app) {
         installation_armed_at = 0;
         return;
     }
+    if (vp_platform_is_psp(item->platform) && item->installed &&
+        item->launch_target[0] != '\0') {
+        bool adrenaline_installed = false;
+        bool plugin_installed = false;
+        bool plugin_enabled = false;
+        (void)vp_vita_psp_runtime_status(&adrenaline_installed, &plugin_installed,
+                                         &plugin_enabled);
+        if (!adrenaline_installed) {
+            show_notification(app, "Instala Adrenaline (PSPEMUCFW) para abrir juegos PSP");
+            return;
+        }
+        if (!plugin_installed || !plugin_enabled) {
+            if (!app->installation_armed) {
+                app->installation_armed = true;
+                installation_armed_at = sceKernelGetProcessTimeWide();
+                show_notification(app, "Presiona X otra vez para instalar el complemento PSP");
+                return;
+            }
+            const char *error = "No se pudo instalar el complemento PSP";
+            if (vp_vita_psp_plugin_install()) {
+                (void)vp_vita_psp_runtime_status(NULL, &plugin_installed, &plugin_enabled);
+                if (plugin_installed && plugin_enabled) error = NULL;
+                else error = vp_vita_last_error();
+            } else {
+                error = vp_vita_last_error();
+            }
+            app->installation_armed = false;
+            installation_armed_at = 0;
+            if (error != NULL) {
+                show_notification(app, "%.150s", error);
+                return;
+            }
+            show_notification(app, "Complemento PSP instalado; pulsa X para jugar");
+            return;
+        }
+        if (!vp_vita_write_psp_boot_request(item->launch_target)) {
+            show_notification(app, "%.150s", vp_vita_last_error());
+            return;
+        }
+        if (!vp_vita_launch_uri("psgm:play?titleid=PSPEMUCFW")) {
+            show_notification(app, "No se pudo abrir Adrenaline; verifica que este instalado");
+            return;
+        }
+        sceKernelExitProcess(0);
+        return;
+    }
     if (item->installed && item->launch_target[0] != '\0') {
         if (item->source==VP_SOURCE_LOCAL && !strcmp(item->platform,"psvita")) {
             char uri[VP_LAUNCH_URI];
@@ -1758,7 +1833,7 @@ static void activate_selected(VpApp *app) {
                            "RomM no expuso un archivo descargable para esta ROM");
             return;
         }
-        if (!vp_item_download_path(item, "ux0:data/vitashelflauncher/downloads", path, sizeof(path))) {
+        if (!vp_item_install_path(item, VP_DOWNLOAD_ROOT, VP_PSP_ISO_ROOT, path, sizeof(path))) {
             (void)snprintf(app->notice, sizeof(app->notice), "No se pudo preparar el nombre de descarga");
             return;
         }
@@ -2340,6 +2415,8 @@ int main(void) {
     (void)sceIoMkdir("ux0:data/vitashelflauncher/cache", 0777);
     (void)sceIoMkdir("ux0:data/vitashelflauncher/cache/covers", 0777);
     (void)sceIoMkdir("ux0:data/vitashelflauncher/downloads", 0777);
+    (void)sceIoMkdir("ux0:pspemu", 0777);
+    (void)sceIoMkdir(VP_PSP_ISO_ROOT, 0777);
     load_providers(&app);
     steamgrid_state=steamgrid_api_key[0]?VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
     image_service_state=romm_config.image_proxy_url[0] || romm_config.base_url[0]?

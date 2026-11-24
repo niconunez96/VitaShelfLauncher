@@ -2,6 +2,7 @@
 /build/
 /build-*/
 /cmake-build-*/
+/.build/
 /dist/
 CMakeCache.txt
 CMakeFiles/
@@ -41,6 +42,7 @@ Thumbs.db
 
 # Local agent state and captures
 .atl/
+/odd/
 .agents/cache/
 .agents/*.local.*
 AGENTS.local.md

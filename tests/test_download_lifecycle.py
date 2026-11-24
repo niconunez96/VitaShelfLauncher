@@ -61,6 +61,26 @@ class VitaDownloadLifecycleTests(unittest.TestCase):
         self.assertIn("Cuadrado", README)
 
 
+class VitaPspRomStagingTests(unittest.TestCase):
+    def test_psp_roms_are_staged_in_adrenaline_iso_directory(self):
+        self.assertIn('#define VP_PSP_ISO_ROOT "ux0:pspemu/ISO"', MAIN)
+        activate = function_source(MAIN, "static void activate_selected")
+        self.assertIn("vp_item_install_path(", activate)
+        self.assertIn("VP_PSP_ISO_ROOT", activate)
+        refresh = function_source(MAIN, "static bool installed_item_path")
+        self.assertIn('"iso"', refresh)
+        self.assertIn('"cso"', refresh)
+
+    def test_extracted_target_survives_worker_to_launch_target(self):
+        worker = function_source(MAIN, "static void *background_job_run")
+        self.assertIn("vp_vita_extract_psp_archive(", worker)
+        self.assertIn('strcmp(extension, "zip") == 0', worker)
+        poll = function_source(MAIN, "static void background_job_poll")
+        self.assertIn("resolved", poll)
+        self.assertIn("completed->launch_target", poll)
+        self.assertIn("resolved", poll[poll.index("completed->launch_target") - 200:])
+
+
 class VitaAppEventPollingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

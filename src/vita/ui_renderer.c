@@ -677,23 +677,24 @@ static void settings(const VpUiFrame *f) {
         text(f,VP_TYPE_DESCRIPTION,334,224,552,panel_muted,detail);
         text(f,VP_TYPE_DESCRIPTION,334,250,552,panel_muted,"Descargas: ux0:data/vitashelflauncher/downloads/");
         text(f,VP_TYPE_DESCRIPTION,334,276,552,panel_muted,"Imágenes: ux0:data/vitashelflauncher/cache/covers/");
+        text(f,VP_TYPE_DESCRIPTION,334,302,552,panel_muted,"PSP ISO: ux0:pspemu/ISO/");
         if (f->romm_state==VP_ROMM_CONNECTED) {
             const char *server=f->romm_url?f->romm_url:"",*scheme=strstr(server,"://"),*end,*at;
             size_t count=0,j;
             if (scheme) server=scheme+3;
             end=server+strcspn(server,"/?#");
             for (at=server;at<end;at++) if (*at=='@') server=at+1;
-            icon("ui_romm",334,300,24);
-            text(f,VP_TYPE_LIST_TITLE,370,320,516,panel_primary,"RomM");
+            icon("ui_romm",334,328,24);
+            text(f,VP_TYPE_LIST_TITLE,370,348,516,panel_primary,"RomM");
             (void)snprintf(detail,sizeof(detail),"Servidor: %.*s",(int)(end-server),server);
-            text(f,VP_TYPE_DESCRIPTION,334,350,552,panel_muted,detail);
+            text(f,VP_TYPE_DESCRIPTION,334,378,552,panel_muted,detail);
             for (j=0;j<f->app->catalog.count;j++) if (f->app->catalog.items[j].source==VP_SOURCE_ROMM) count++;
             if (f->romm_catalog_available) (void)snprintf(detail,sizeof(detail),"Catálogo: %u juegos",(unsigned)count);
             else (void)snprintf(detail,sizeof(detail),"Catálogo: Sin sincronizar");
-            text(f,VP_TYPE_DESCRIPTION,334,382,552,panel_muted,detail);
+            text(f,VP_TYPE_DESCRIPTION,334,410,552,panel_muted,detail);
             (void)snprintf(detail,sizeof(detail),"Última sincronización: %s",
                 f->romm_catalog_available && f->romm_last_sync[0]?f->romm_last_sync:"Sin datos");
-            text(f,VP_TYPE_DESCRIPTION,334,414,552,panel_muted,detail);
+            text(f,VP_TYPE_DESCRIPTION,334,442,552,panel_muted,detail);
         }
     }
 }

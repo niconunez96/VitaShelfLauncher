@@ -920,6 +920,42 @@ static void test_romm_game_artwork(void) {
     assert(!catalog.items[2].background_url[0]);
 }
 
+static void test_psp_install_paths(void) {
+    VpItem item;
+    char path[VP_PATH];
+    assert(vp_platform_is_psp("PSP"));
+    assert(vp_platform_is_psp("playstation portable"));
+    assert(!vp_platform_is_psp("snes"));
+
+    memset(&item, 0, sizeof(item));
+    item.source = VP_SOURCE_ROMM;
+    (void)snprintf(item.id, sizeof(item.id), "%s", "romm:42");
+    (void)snprintf(item.remote_id, sizeof(item.remote_id), "%s", "42");
+    (void)snprintf(item.platform, sizeof(item.platform), "%s", "PSP");
+    (void)snprintf(item.title, sizeof(item.title), "%s", "God of War");
+    (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "God of War.iso");
+
+    assert(vp_item_install_path(&item, "ux0:data/vitashelflauncher/downloads", "ux0:pspemu/ISO",
+                                path, sizeof(path)));
+    assert(strcmp(path, "ux0:pspemu/ISO/godofwar_42.iso") == 0);
+    (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "God of War.cso");
+    assert(vp_item_psp_image_path(&item, "ux0:pspemu/ISO", "cso", path, sizeof(path)));
+    assert(strcmp(path, "ux0:pspemu/ISO/godofwar_42.cso") == 0);
+    (void)snprintf(item.download_url, sizeof(item.download_url), "%s",
+                   "https://romm.local/api/roms/42/content/game.zip");
+    item.fs_name[0] = '\0';
+    assert(vp_item_install_path(&item, "ux0:data/vitashelflauncher/downloads", "ux0:pspemu/ISO",
+                                path, sizeof(path)));
+    assert(strcmp(path, "ux0:pspemu/ISO/godofwar_42.zip") == 0);
+    assert(vp_item_psp_image_path(&item, "ux0:pspemu/ISO", "iso", path, sizeof(path)));
+    assert(strcmp(path, "ux0:pspemu/ISO/godofwar_42.iso") == 0);
+
+    (void)snprintf(item.platform, sizeof(item.platform), "%s", "snes");
+    assert(vp_item_install_path(&item, "ux0:data/vitashelflauncher/downloads", "ux0:pspemu/ISO",
+                                path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/snes/godofwar_42.zip") == 0);
+}
+
 int main(void) {
     VpItem sample = make_item("local:sample", "Sample");
     assert(strcmp(sample.title, "Sample") == 0);
@@ -929,6 +965,7 @@ int main(void) {
     test_library_filters();
     test_romm_metadata();
     test_download_paths();
+    test_psp_install_paths();
     test_launch_profiles();
     test_romm_content_download();
     test_url_escape();

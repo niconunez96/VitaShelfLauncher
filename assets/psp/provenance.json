@@ -1,0 +1,20 @@
+{
+  "component": "VitaShelf Launcher PSP boot plugin (derived from Pocket Shelf)",
+  "upstream_project": "fthdgn-gh/pocket-shelf",
+  "upstream_tag": "shelf-v0.6.1-beta.3",
+  "upstream_commit": "2af22cc2013707a9e1ab76cdfc32fb603cb92df6",
+  "source_repository": "https://github.com/fthdgn-gh/pocket-shelf",
+  "release_url": "https://github.com/fthdgn-gh/pocket-shelf/releases/tag/shelf-v0.6.1-beta.3",
+  "upstream_license": "MIT",
+  "upstream_copyright": "Copyright (c) 2026 fthdgn; Copyright (c) 2026 Yifeng \"Evan\" Wang",
+  "vendored_source": "vendor/pocket-shelf-psp-boot/psp-boot",
+  "build_script": "scripts/build-psp-plugin.sh",
+  "build_toolchain_image": "pspdev/pspdev:latest",
+  "artifact": "vitashelflauncher_pspboot.prx",
+  "prx_path_in_vpk": "psp/vitashelflauncher_pspboot.prx",
+  "prx_sha256": "63065280e04be8434f36f018f45a3d367f005a99cb946fdfe6f9a44156b1ef48",
+  "license_file": "LICENSE.txt",
+  "third_party_notices_file": "THIRD_PARTY_NOTICES.txt",
+  "retrieved_at": "2026-11-23",
+  "notes": "Upstream psp-boot source was forked and renamed. The GPL-3.0 updater directory was not vendored."
+}

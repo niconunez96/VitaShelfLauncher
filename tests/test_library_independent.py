@@ -177,7 +177,7 @@ class LibraryStateTests(unittest.TestCase):
             "static void handle_library_modal_input("))
         start = SOURCE.index("        VpItem *completed = vp_catalog_find(&app->catalog, item.id);")
         end = SOURCE.index("    } else if (kind == VP_JOB_INSTALL_HOMEBREW)", start)
-        download = "static void complete_download(void) { VpApp *value=&app; VpItem item=app.catalog.items[1]; const char *destination=\"downloads/zelda.sfc\";\n" + SOURCE[start:end].replace("app->", "value->").replace("show_notification(app,", "show_notification(value,") + "\n}\n"
+        download = "static void complete_download(void) { VpApp *value=&app; VpItem item=app.catalog.items[1]; const char *destination=\"downloads/zelda.sfc\"; char resolved[VP_PATH]; (void)snprintf(resolved,sizeof(resolved),\"%s\",destination);\n" + SOURCE[start:end].replace("app->", "value->").replace("show_notification(app,", "show_notification(value,") + "\n}\n"
         start = SOURCE.index("static unsigned int touch_navigation_pressed(")
         end = SOURCE.index("    if (app.active_screen != VP_SCREEN_SETTINGS)", start)
         touch = SOURCE[start:end] + "return 0;\n}\n"

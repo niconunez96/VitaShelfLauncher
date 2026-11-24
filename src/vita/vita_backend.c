@@ -6,6 +6,7 @@
 #include <psp2/io/stat.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/promoterutil.h>
+#include <psp2/rtc.h>
 #include <psp2/sysmodule.h>
 #include <zip.h>
 
@@ -14,7 +15,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 
 #define VP_STAGE_DIR "ux0:data/vitashelflauncher/staging/latest"
@@ -24,6 +27,18 @@
 #define VP_TRANSFER_BUFFER_SIZE (512 * 1024)
 /* Progress callbacks are throttled so UI redraws do not slow the transfer down. */
 #define VP_TRANSFER_PROGRESS_INTERVAL_US (100 * 1000ULL)
+#define VP_ADRENALINE_EBOOT "ux0:/app/PSPEMUCFW/eboot.bin"
+#define VP_PSP_PLUGIN_SOURCE "app0:psp/vitashelflauncher_pspboot.prx"
+#define VP_PSP_SE_ROOT "ux0:/pspemu/seplugins"
+#define VP_PSP_PLUGIN_TARGET "ux0:/pspemu/seplugins/vitashelflauncher_pspboot.prx"
+#define VP_PSP_PLUGIN_PSP_PATH "ms0:/seplugins/vitashelflauncher_pspboot.prx"
+#define VP_PSP_PLUGIN_LINE_CLASSIC "ms0:/seplugins/vitashelflauncher_pspboot.prx 1"
+#define VP_PSP_PLUGIN_LINE_EPI "xmb, ms0:/seplugins/vitashelflauncher_pspboot.prx, on"
+#define VP_PSP_VSH_PLUGINS "ux0:/pspemu/seplugins/vsh.txt"
+#define VP_PSP_EPI_PLUGINS "ux0:/pspemu/seplugins/EPIplugins.txt"
+#define VP_PSP_SE_PLUGINS "ux0:/pspemu/seplugins/plugins.txt"
+#define VP_PSP_BOOT_REQUEST "ux0:/pspemu/VitaShelfLauncher/boot.txt"
+#define VP_PSP_PLUGIN_LOG "ux0:data/vitashelflauncher/psp-plugin.log"
 
 typedef struct {
     char *buffer;
@@ -59,6 +74,33 @@ static char last_error[VP_TEXT];
 
 const char *vp_vita_last_error(void) {
     return last_error[0] != '\0' ? last_error : "sin detalle";
+}
+
+void vp_vita_set_error(const char *message) {
+    if (message == NULL || message[0] == '\0') last_error[0] = '\0';
+    else (void)snprintf(last_error, sizeof(last_error), "%.190s", message);
+}
+
+static void record_psp_plugin_event(const char *step, int code) {
+    FILE *log;
+    (void)sceIoMkdir("ux0:data", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
+    log = fopen(VP_PSP_PLUGIN_LOG, "a");
+    if (log == NULL) return;
+    (void)fprintf(log, "step=%s code=0x%08X source=%s target=%s\n",
+                  step != NULL ? step : "?", (unsigned int)code,
+                  VP_PSP_PLUGIN_SOURCE, VP_PSP_PLUGIN_TARGET);
+    fclose(log);
+}
+
+static bool psp_plugin_copy_failed(const char *step, int code) {
+    char message[VP_TEXT];
+    record_psp_plugin_event(step, code);
+    (void)snprintf(message, sizeof(message),
+                   "No se pudo instalar el complemento PSP en seplugins: %s (0x%08X)",
+                   step != NULL ? step : "?", (unsigned int)code);
+    vp_vita_set_error(message);
+    return false;
 }
 
 static void set_last_error(CURLcode result, long status, const char *response, bool truncated) {
@@ -266,6 +308,533 @@ static bool extract_vpk(const char *vpk_path, const char *destination) {
         sceIoClose(output_fd);
     }
     zip_close(archive);
+    return true;
+}
+
+#define VP_PSP_ARCHIVE_MAX_SIZE (2ULL * 1024ULL * 1024ULL * 1024ULL)
+
+static bool psp_archive_extension(const char *entry, char *extension, size_t capacity) {
+    const char *name;
+    const char *cursor;
+    const char *dot = NULL;
+    const char *end;
+    size_t length;
+    size_t index;
+    if (entry == NULL || extension == NULL || capacity < 4) return false;
+    name = entry;
+    for (cursor = entry; *cursor != '\0'; cursor++) {
+        if (*cursor == '/' || *cursor == '\\') name = cursor + 1;
+        if (*cursor < 0x20 || *cursor == ':') return false;
+    }
+    end = name + strlen(name);
+    for (cursor = name; cursor < end; cursor++) if (*cursor == '.') dot = cursor;
+    if (dot == NULL || dot + 1 >= end) return false;
+    length = (size_t)(end - (dot + 1));
+    if (length != 3 || length + 1 > capacity) return false;
+    for (index = 0; index < length; index++) {
+        unsigned char value = (unsigned char)dot[1 + index];
+        if (!isalnum(value)) return false;
+        extension[index] = (char)tolower(value);
+    }
+    extension[length] = '\0';
+    return strcmp(extension, "iso") == 0 || strcmp(extension, "cso") == 0;
+}
+
+bool vp_vita_extract_psp_archive(const VpItem *item, const char *archive_path,
+                                 const char *psp_root, char *resolved,
+                                 size_t resolved_capacity) {
+    int error = 0;
+    zip_t *archive;
+    zip_int64_t count;
+    zip_int64_t selected = -1;
+    zip_file_t *input = NULL;
+    SceUID output_fd = -1;
+    char selected_extension[8] = "";
+    char final_path[VP_PATH];
+    char partial_path[VP_PATH + 8];
+    zip_stat_t info;
+
+    vp_vita_set_error(NULL);
+    if (item == NULL || archive_path == NULL || psp_root == NULL ||
+        resolved == NULL || resolved_capacity == 0) {
+        vp_vita_set_error("No se pudo preparar la extraccion PSP");
+        return false;
+    }
+    archive = zip_open(archive_path, ZIP_RDONLY, &error);
+    if (archive == NULL) {
+        vp_vita_set_error("No se pudo abrir el ZIP de la ROM PSP");
+        return false;
+    }
+    count = zip_get_num_entries(archive, 0);
+    if (count <= 0 || count > 128) {
+        zip_close(archive);
+        vp_vita_set_error("El ZIP de la ROM PSP tiene una cantidad de archivos invalida");
+        return false;
+    }
+    for (zip_int64_t index = 0; index < count; index++) {
+        const char *entry = zip_get_name(archive, (zip_uint64_t)index, 0);
+        char extension[8];
+        if (entry == NULL || entry[0] == '\0' || has_unsafe_path(entry) ||
+            strncmp(entry, "__MACOSX/", 9) == 0 || entry[0] == '.') continue;
+        if (entry[strlen(entry) - 1] == '/') continue;
+        if (!psp_archive_extension(entry, extension, sizeof(extension))) continue;
+        if (zip_stat_index(archive, (zip_uint64_t)index, 0, &info) == 0 &&
+            info.size > VP_PSP_ARCHIVE_MAX_SIZE) {
+            zip_close(archive);
+            vp_vita_set_error("La imagen PSP del ZIP es demasiado grande");
+            return false;
+        }
+        if (selected >= 0) {
+            zip_close(archive);
+            vp_vita_set_error("El ZIP contiene mas de una imagen ISO/CSO");
+            return false;
+        }
+        selected = index;
+        (void)snprintf(selected_extension, sizeof(selected_extension), "%s", extension);
+    }
+    if (selected < 0) {
+        zip_close(archive);
+        vp_vita_set_error("El ZIP no contiene una imagen ISO/CSO");
+        return false;
+    }
+    if (!vp_item_psp_image_path(item, psp_root, selected_extension,
+                                final_path, sizeof(final_path)) ||
+        snprintf(partial_path, sizeof(partial_path), "%s.part", final_path) >=
+            (int)sizeof(partial_path)) {
+        zip_close(archive);
+        vp_vita_set_error("No se pudo preparar la ruta de extraccion PSP");
+        return false;
+    }
+    if (!make_parent_dirs(partial_path)) {
+        zip_close(archive);
+        vp_vita_set_error("No se pudo crear el directorio ISO de PSP");
+        return false;
+    }
+    input = zip_fopen_index(archive, (zip_uint64_t)selected, 0);
+    output_fd = sceIoOpen(partial_path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+    if (input == NULL || output_fd < 0) {
+        if (input != NULL) (void)zip_fclose(input);
+        if (output_fd >= 0) (void)sceIoClose(output_fd);
+        zip_close(archive);
+        (void)sceIoRemove(partial_path);
+        vp_vita_set_error("No se pudo iniciar la extraccion PSP");
+        return false;
+    }
+    for (;;) {
+        zip_int64_t read_count = zip_fread(input, extract_block, sizeof(extract_block));
+        size_t offset = 0;
+        if (read_count < 0) {
+            (void)zip_fclose(input);
+            (void)sceIoClose(output_fd);
+            zip_close(archive);
+            (void)sceIoRemove(partial_path);
+            vp_vita_set_error("Falló la lectura del ZIP PSP");
+            return false;
+        }
+        if (read_count == 0) break;
+        while (offset < (size_t)read_count) {
+            int write_count = sceIoWrite(output_fd, extract_block + offset,
+                                         (size_t)read_count - offset);
+            if (write_count <= 0) {
+                (void)zip_fclose(input);
+                (void)sceIoClose(output_fd);
+                zip_close(archive);
+                (void)sceIoRemove(partial_path);
+                vp_vita_set_error("No se pudo escribir la imagen PSP extraida");
+                return false;
+            }
+            offset += (size_t)write_count;
+        }
+    }
+    if (zip_fclose(input) != 0 || sceIoClose(output_fd) < 0) {
+        zip_close(archive);
+        (void)sceIoRemove(partial_path);
+        vp_vita_set_error("No se pudo cerrar la imagen PSP extraida");
+        return false;
+    }
+    zip_close(archive);
+    (void)sceIoRemove(final_path);
+    if (sceIoRename(partial_path, final_path) < 0) {
+        (void)sceIoRemove(partial_path);
+        vp_vita_set_error("No se pudo instalar la imagen PSP extraida");
+        return false;
+    }
+    (void)sceIoRemove(archive_path);
+    (void)snprintf(resolved, resolved_capacity, "%s", final_path);
+    return true;
+}
+
+static bool path_exists(const char *path) {
+    SceIoStat stat;
+    return path != NULL && sceIoGetstat(path, &stat) >= 0;
+}
+
+static bool path_file_size(const char *path, uint64_t *size) {
+    SceIoStat stat;
+    if (path == NULL || size == NULL) return false;
+    if (sceIoGetstat(path, &stat) < 0) return false;
+    *size = (uint64_t)stat.st_size;
+    return true;
+}
+
+static bool copy_whole_file_with_status(const char *source, const char *destination, int *failure_code) {
+    SceUID input = -1;
+    SceUID output = -1;
+    int read_count;
+    int code = 0;
+    bool ok = false;
+
+    if (failure_code != NULL) *failure_code = 0;
+    input = sceIoOpen(source, SCE_O_RDONLY, 0);
+    if (input < 0) {
+        code = (int)input;
+        goto cleanup;
+    }
+    if (!make_parent_dirs(destination)) {
+        code = -1;
+        goto cleanup;
+    }
+    output = sceIoOpen(destination, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+    if (output < 0) {
+        code = (int)output;
+        goto cleanup;
+    }
+    ok = true;
+    for (;;) {
+        size_t offset = 0;
+        read_count = sceIoRead(input, extract_block, sizeof(extract_block));
+        if (read_count < 0) {
+            code = read_count;
+            ok = false;
+            break;
+        }
+        if (read_count == 0) break;
+        while (offset < (size_t)read_count) {
+            int write_count = sceIoWrite(output, extract_block + offset,
+                                         (size_t)read_count - offset);
+            if (write_count <= 0) {
+                code = write_count;
+                ok = false;
+                break;
+            }
+            offset += (size_t)write_count;
+        }
+        if (!ok) break;
+    }
+cleanup:
+    if (input >= 0 && sceIoClose(input) < 0 && ok) {
+        code = -2;
+        ok = false;
+    }
+    if (output >= 0 && sceIoClose(output) < 0 && ok) {
+        code = -3;
+        ok = false;
+    }
+    if (!ok) {
+        if (failure_code != NULL) *failure_code = code != 0 ? code : -1;
+        (void)sceIoRemove(destination);
+    }
+    return ok;
+}
+
+static bool copy_whole_file(const char *source, const char *destination) {
+    return copy_whole_file_with_status(source, destination, NULL);
+}
+
+static bool same_file_bytes(const char *left, const char *right) {
+    SceUID left_fd;
+    SceUID right_fd;
+    uint64_t left_size;
+    uint64_t right_size;
+    bool same = true;
+    if (!path_file_size(left, &left_size) || !path_file_size(right, &right_size) ||
+        left_size != right_size) return false;
+    left_fd = sceIoOpen(left, SCE_O_RDONLY, 0);
+    right_fd = sceIoOpen(right, SCE_O_RDONLY, 0);
+    if (left_fd < 0 || right_fd < 0) {
+        if (left_fd >= 0) (void)sceIoClose(left_fd);
+        if (right_fd >= 0) (void)sceIoClose(right_fd);
+        return false;
+    }
+    for (;;) {
+        int left_count = sceIoRead(left_fd, extract_block, sizeof(extract_block));
+        int right_count;
+        if (left_count <= 0) break;
+        right_count = sceIoRead(right_fd, extract_block, sizeof(extract_block));
+        if (left_count != right_count || memcmp(extract_block, extract_block + left_count,
+                                                (size_t)left_count) != 0) {
+            same = false;
+            break;
+        }
+    }
+    if (sceIoRead(right_fd, extract_block, 1) > 0) same = false;
+    (void)sceIoClose(left_fd);
+    (void)sceIoClose(right_fd);
+    return same;
+}
+
+static bool read_text_file(const char *path, char *buffer, size_t capacity) {
+    SceUID fd = sceIoOpen(path, SCE_O_RDONLY, 0);
+    int count;
+    size_t used = 0;
+    if (fd < 0) {
+        buffer[0] = '\0';
+        return false;
+    }
+    count = sceIoRead(fd, buffer, capacity - 1);
+    (void)sceIoClose(fd);
+    if (count < 0) {
+        buffer[0] = '\0';
+        return false;
+    }
+    used = (size_t)count;
+    while (used > 0 && (buffer[used - 1] == '\n' || buffer[used - 1] == '\r')) used--;
+    buffer[used] = '\0';
+    return true;
+}
+
+typedef enum {
+    VP_PSP_LIST_CLASSIC = 0,
+    VP_PSP_LIST_EPI
+} VpPspPluginListFormat;
+
+static bool line_mentions_plugin(const char *line, size_t length) {
+    char buffer[512];
+    size_t copy = length < sizeof(buffer) - 1 ? length : sizeof(buffer) - 1;
+    (void)memcpy(buffer, line, copy);
+    buffer[copy] = '\0';
+    return strstr(buffer, "vitashelflauncher_pspboot.prx") != NULL;
+}
+
+static bool line_enables_plugin(const char *line, size_t length) {
+    char buffer[512];
+    size_t copy = length < sizeof(buffer) - 1 ? length : sizeof(buffer) - 1;
+    (void)memcpy(buffer, line, copy);
+    buffer[copy] = '\0';
+    if (strstr(buffer, "vitashelflauncher_pspboot.prx") == NULL) return false;
+    return strstr(buffer, " 1") != NULL || strstr(buffer, ", on") != NULL ||
+           strstr(buffer, ", enabled") != NULL || strstr(buffer, ", true") != NULL;
+}
+
+static bool write_plugin_enable_file(const char *path, VpPspPluginListFormat format) {
+    enum { CURRENT_SIZE = 8192, NEXT_SIZE = 9216 };
+    char *current = (char *)malloc(CURRENT_SIZE);
+    char *next = (char *)malloc(NEXT_SIZE);
+    char temp[VP_PATH + 8];
+    const char *cursor;
+    const char *enable_line;
+    size_t line_length;
+    size_t used = 0;
+    bool found = false;
+    bool ok = false;
+    SceUID fd;
+
+    if (current == NULL || next == NULL) goto cleanup;
+    enable_line = format == VP_PSP_LIST_EPI ? VP_PSP_PLUGIN_LINE_EPI
+                                            : VP_PSP_PLUGIN_LINE_CLASSIC;
+    line_length = strlen(enable_line);
+    (void)read_text_file(path, current, CURRENT_SIZE);
+    cursor = current;
+    while (*cursor != '\0') {
+        const char *end = strchr(cursor, '\n');
+        size_t length = end != NULL ? (size_t)(end - cursor) : strlen(cursor);
+        if (line_mentions_plugin(cursor, length)) {
+            if (used + line_length + 1 >= NEXT_SIZE) goto cleanup;
+            used += (size_t)snprintf(next + used, NEXT_SIZE - used, "%s\n", enable_line);
+            found = true;
+        } else {
+            if (used + length + 2 > NEXT_SIZE) goto cleanup;
+            (void)memcpy(next + used, cursor, length);
+            used += length;
+            next[used++] = '\n';
+        }
+        if (end == NULL) break;
+        cursor = end + 1;
+    }
+    if (!found) {
+        if (used + line_length + 1 >= NEXT_SIZE) goto cleanup;
+        used += (size_t)snprintf(next + used, NEXT_SIZE - used, "%s\n", enable_line);
+    }
+    next[used] = '\0';
+    if (snprintf(temp, sizeof(temp), "%s.part", path) >= (int)sizeof(temp) ||
+        !make_parent_dirs(temp)) goto cleanup;
+    fd = sceIoOpen(temp, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+    if (fd < 0) goto cleanup;
+    ok = sceIoWrite(fd, next, used) == (int)used;
+    if (sceIoClose(fd) < 0) ok = false;
+    if (!ok) {
+        (void)sceIoRemove(temp);
+        goto cleanup;
+    }
+    (void)sceIoRemove(path);
+    if (sceIoRename(temp, path) < 0) {
+        (void)sceIoRemove(temp);
+        goto cleanup;
+    }
+    ok = true;
+
+cleanup:
+    free(current);
+    free(next);
+    return ok;
+}
+
+static bool plugin_file_enabled(const char *path) {
+    char contents[8192];
+    const char *cursor;
+    if (!read_text_file(path, contents, sizeof(contents))) return false;
+    cursor = contents;
+    while (*cursor != '\0') {
+        const char *end = strchr(cursor, '\n');
+        size_t length = end != NULL ? (size_t)(end - cursor) : strlen(cursor);
+        if (line_enables_plugin(cursor, length)) return true;
+        if (end == NULL) break;
+        cursor = end + 1;
+    }
+    return false;
+}
+
+bool vp_vita_psp_runtime_status(bool *adrenaline_installed, bool *plugin_installed,
+                                bool *plugin_enabled) {
+    if (adrenaline_installed != NULL) *adrenaline_installed = path_exists(VP_ADRENALINE_EBOOT);
+    if (plugin_installed != NULL) *plugin_installed = path_exists(VP_PSP_PLUGIN_TARGET);
+    if (plugin_enabled != NULL) {
+        *plugin_enabled = plugin_file_enabled(VP_PSP_VSH_PLUGINS) ||
+                          plugin_file_enabled(VP_PSP_EPI_PLUGINS) ||
+                          plugin_file_enabled(VP_PSP_SE_PLUGINS);
+    }
+    return true;
+}
+
+static void ensure_psp_plugin_dirs(void) {
+    int code = 0;
+    if (!path_exists(VP_PSP_SE_ROOT)) code = sceIoMkdir(VP_PSP_SE_ROOT, 0777);
+    record_psp_plugin_event("mkdir-pspemu-seplugins", code);
+}
+
+bool vp_vita_psp_plugin_install(void) {
+    uint64_t source_size;
+    uint64_t target_size;
+    int copy_code = 0;
+    vp_vita_set_error(NULL);
+    if (!path_file_size(VP_PSP_PLUGIN_SOURCE, &source_size)) {
+        record_psp_plugin_event("source-stat", -1);
+        vp_vita_set_error("No se encontro el complemento PSP incluido en VitaShelf");
+        return false;
+    }
+    if (!path_file_size(VP_PSP_PLUGIN_TARGET, &target_size) || source_size != target_size ||
+        !same_file_bytes(VP_PSP_PLUGIN_SOURCE, VP_PSP_PLUGIN_TARGET)) {
+        ensure_psp_plugin_dirs();
+        if (path_exists(VP_PSP_PLUGIN_TARGET)) {
+            int remove_code = sceIoRemove(VP_PSP_PLUGIN_TARGET);
+            record_psp_plugin_event("remove-target", remove_code);
+        }
+        if (!copy_whole_file_with_status(VP_PSP_PLUGIN_SOURCE, VP_PSP_PLUGIN_TARGET,
+                                         &copy_code)) {
+            return psp_plugin_copy_failed("copy", copy_code);
+        }
+    }
+    if (!write_plugin_enable_file(VP_PSP_VSH_PLUGINS, VP_PSP_LIST_CLASSIC)) {
+        vp_vita_set_error("No se pudo habilitar el complemento PSP en vsh.txt");
+        return false;
+    }
+    if (path_exists(VP_PSP_EPI_PLUGINS)) {
+        if (!write_plugin_enable_file(VP_PSP_EPI_PLUGINS, VP_PSP_LIST_EPI)) {
+            vp_vita_set_error("No se pudo habilitar el complemento PSP en EPIplugins.txt");
+            return false;
+        }
+    } else if (path_exists(VP_PSP_SE_PLUGINS)) {
+        if (!write_plugin_enable_file(VP_PSP_SE_PLUGINS, VP_PSP_LIST_EPI)) {
+            vp_vita_set_error("No se pudo habilitar el complemento PSP en plugins.txt");
+            return false;
+        }
+    } else if (!write_plugin_enable_file(VP_PSP_SE_PLUGINS, VP_PSP_LIST_EPI)) {
+        vp_vita_set_error("No se pudo crear la lista de complementos PSP");
+        return false;
+    }
+    (void)sceIoRemove(VP_PSP_BOOT_REQUEST);
+    return true;
+}
+
+static bool psp_request_name(const char *image_path, char *name, size_t capacity) {
+    const char *prefix = "ux0:pspemu/ISO/";
+    const char *file;
+    const char *cursor;
+    size_t length;
+    if (image_path == NULL || strncmp(image_path, prefix, strlen(prefix)) != 0) return false;
+    file = image_path + strlen(prefix);
+    length = strlen(file);
+    if (length == 0 || length >= capacity || strchr(file, '/') != NULL ||
+        strstr(file, "..") != NULL) return false;
+    for (cursor = file; *cursor != '\0'; cursor++) {
+        if (*cursor < 0x20 || *cursor == ':' || *cursor == '\\') return false;
+    }
+    if (length < 4 || (strcasecmp(file + length - 4, ".iso") != 0 &&
+                       strcasecmp(file + length - 4, ".cso") != 0)) return false;
+    (void)snprintf(name, capacity, "%s", file);
+    return true;
+}
+
+static bool psp_boot_request_stale(void) {
+    char contents[256];
+    char *end = NULL;
+    unsigned long long written;
+    SceRtcTick now;
+    if (!read_text_file(VP_PSP_BOOT_REQUEST, contents, sizeof(contents))) return true;
+    written = strtoull(contents, &end, 10);
+    if (end == contents || sceRtcGetCurrentTick(&now) < 0) return true;
+    return now.tick > written && now.tick - written > 30000000ULL;
+}
+
+bool vp_vita_write_psp_boot_request(const char *image_path) {
+    char name[240];
+    char contents[768];
+    char temp[VP_PATH + 8];
+    SceRtcTick now;
+    SceUID fd;
+    int written;
+    bool ok = true;
+    vp_vita_set_error(NULL);
+    if (!psp_request_name(image_path, name, sizeof(name))) {
+        vp_vita_set_error("La ruta ISO/CSO de PSP no es valida para Adrenaline");
+        return false;
+    }
+    if (sceRtcGetCurrentTick(&now) < 0) {
+        vp_vita_set_error("No se pudo leer el reloj de PS Vita");
+        return false;
+    }
+    if (path_exists(VP_PSP_BOOT_REQUEST) && !psp_boot_request_stale()) {
+        (void)sceIoRemove(VP_PSP_BOOT_REQUEST);
+    }
+    if (!make_parent_dirs(VP_PSP_BOOT_REQUEST) ||
+        snprintf(temp, sizeof(temp), "%s.part", VP_PSP_BOOT_REQUEST) >= (int)sizeof(temp)) {
+        vp_vita_set_error("No se pudo preparar la solicitud de arranque PSP");
+        return false;
+    }
+    written = snprintf(contents, sizeof(contents), "%llu\niso\nms0:/ISO/%s\nEBOOT.BIN\n-\n",
+                       (unsigned long long)now.tick, name);
+    if (written <= 0 || (size_t)written >= sizeof(contents)) {
+        vp_vita_set_error("No se pudo formar la solicitud de arranque PSP");
+        return false;
+    }
+    fd = sceIoOpen(temp, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+    if (fd < 0) {
+        vp_vita_set_error("No se pudo crear la solicitud de arranque PSP");
+        return false;
+    }
+    if (sceIoWrite(fd, contents, (size_t)written) != written) ok = false;
+    if (sceIoClose(fd) < 0) ok = false;
+    if (!ok) {
+        (void)sceIoRemove(temp);
+        vp_vita_set_error("No se pudo escribir la solicitud de arranque PSP");
+        return false;
+    }
+    (void)sceIoRemove(VP_PSP_BOOT_REQUEST);
+    if (sceIoRename(temp, VP_PSP_BOOT_REQUEST) < 0) {
+        (void)sceIoRemove(temp);
+        vp_vita_set_error("No se pudo publicar la solicitud de arranque PSP");
+        return false;
+    }
     return true;
 }
 

@@ -77,6 +77,10 @@ if(DEFINED ENV{VITASDK})
      NAME ${VITA_APP_NAME}
      FILE ${CMAKE_CURRENT_SOURCE_DIR}/themes/default/theme.ini assets/default/theme.ini
             ${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf openssl.cnf
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/psp/vitashelflauncher_pspboot.prx psp/vitashelflauncher_pspboot.prx
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/psp/LICENSE.txt assets/licenses/VitaShelfLauncher-PSPBoot-LICENSE.txt
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/psp/THIRD_PARTY_NOTICES.txt assets/licenses/VitaShelfLauncher-PSPBoot-THIRD_PARTY_NOTICES.txt
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/psp/provenance.json assets/licenses/VitaShelfLauncher-PSPBoot-provenance.json
               ${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/wallpapers/provenance.json assets/licenses/Wallpaper-provenance.json
              ${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/fonts/OFL.txt assets/blueglass/fonts/OFL.txt
              ${CMAKE_CURRENT_SOURCE_DIR}/assets/blueglass/sources/Carbon-README.txt assets/licenses/Carbon-README.txt

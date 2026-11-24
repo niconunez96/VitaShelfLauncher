@@ -607,6 +607,7 @@ int main(int argc,char **argv) {
             assert(strstr(frame_text,"Libre: 12.0 GiB / 32.0 GiB\n"));
             assert(strstr(frame_text,"Descargas: ux0:data/vitashelflauncher/downloads/\n"));
             assert(strstr(frame_text,"Imágenes: ux0:data/vitashelflauncher/cache/covers/\n"));
+            assert(strstr(frame_text,"PSP ISO: ux0:pspemu/ISO/\n"));
             if (c==10) assert(!strstr(frame_text,"Servidor:") && !strstr(frame_text,"Catálogo:") && !strstr(frame_text,"Última sincronización:"));
             else {
                 assert(strstr(frame_text,"Servidor: romm.example.test\n"));

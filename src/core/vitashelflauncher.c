@@ -659,6 +659,49 @@ bool vp_item_download_path(const VpItem *item, const char *directory,
     return written > 0 && (size_t)written < capacity;
 }
 
+bool vp_platform_is_psp(const char *platform) {
+    return vp_compare_ci(platform, "psp") == 0 ||
+           vp_compare_ci(platform, "playstation portable") == 0;
+}
+
+bool vp_item_psp_image_path(const VpItem *item, const char *psp_root,
+                            const char *extension, char *destination, size_t capacity) {
+    char basename[VP_TEXT];
+    char normalized[VP_DOWNLOAD_EXTENSION];
+    size_t index = 0;
+    size_t root_length;
+    int written;
+
+    if (item == NULL || item->id[0] == '\0' || psp_root == NULL || psp_root[0] == '\0' ||
+        destination == NULL || capacity == 0) return false;
+    vp_item_download_basename(item, basename, sizeof(basename));
+    if (extension != NULL && extension[0] != '\0') {
+        if (*extension == '.') extension++;
+        while (extension[index] != '\0') {
+            unsigned char value = (unsigned char)extension[index];
+            if (!isalnum(value)) return false;
+            if (index + 1 >= sizeof(normalized)) return false;
+            normalized[index] = (char)tolower(value);
+            index++;
+        }
+        normalized[index] = '\0';
+    } else if (!vp_item_extension(item, normalized, sizeof(normalized))) {
+        return false;
+    }
+    root_length = strlen(psp_root);
+    while (root_length > 0 && psp_root[root_length - 1] == '/') root_length--;
+    written = snprintf(destination, capacity, "%.*s/%s.%s", (int)root_length, psp_root,
+                       basename, normalized);
+    return written > 0 && (size_t)written < capacity;
+}
+
+bool vp_item_install_path(const VpItem *item, const char *directory, const char *psp_root,
+                          char *destination, size_t capacity) {
+    if (vp_platform_is_psp(item != NULL ? item->platform : NULL))
+        return vp_item_psp_image_path(item, psp_root, NULL, destination, capacity);
+    return vp_item_download_path(item, directory, destination, capacity);
+}
+
 typedef struct {
     const char *platform;
     const char *core;

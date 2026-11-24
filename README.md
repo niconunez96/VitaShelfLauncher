@@ -52,9 +52,13 @@ La Biblioteca ofrece tres maneras de explorar cada plataforma: grilla, lista con
 
 El código se usa una sola vez. No compartas el archivo de configuración de la app: contiene el token de acceso recibido. Para descargas pausadas, presioná `X` para reanudar o `Cuadrado` para quitarlas de la cola.
 
-Los ajustes se ordenan en **Integraciones**, **Descargas**, **Apariencia** y **Acerca de**. En **Apariencia**, elige uno de los cuatro fondos con la cruceta y `X`, o toca su miniatura. **Fondo animado** muestra un interruptor para activar o desactivar el vaivén continuo del fondo; cámbialo con `X` o tocando la fila. Todos los ajustes de apariencia se guardan automáticamente. La vista de ROM elegida con `Triángulo` (cuadrícula, lista o carrusel) también se guarda y se restaura al reiniciar. En **Acerca de** puedes consultar la versión, el espacio libre y las rutas de almacenamiento; si RomM está conectado, también verás el servidor, la cantidad de juegos de su catálogo y la última sincronización. Si aún no hay un catálogo sincronizado para ese servidor, se indica sin mostrar datos de otro servidor.
+Los ajustes se ordenan en **Integraciones**, **Descargas**, **Apariencia** y **Acerca de**. En **Apariencia**, elige uno de los cuatro fondos con la cruceta y `X`, o toca su miniatura. **Fondo animado** muestra un interruptor para activar o desactivar el vaivén continuo del fondo; cámbialo con `X` o tocando la fila. Todos los ajustes de apariencia se guardan automáticamente. La vista de ROM elegida con `Triángulo` (cuadrícula, lista o carrusel) también se guarda y se restaura al reiniciar. En **Acerca de** puedes consultar la versión, el espacio libre, las rutas de almacenamiento y la carpeta PSP ISO; si RomM está conectado, también verás el servidor, la cantidad de juegos de su catálogo y la última sincronización. Si aún no hay un catálogo sincronizado para ese servidor, se indica sin mostrar datos de otro servidor.
 
-### 3. Favoritos y filtros de biblioteca
+### 3. Juegos PSP desde RomM
+
+Con Adrenaline instalado, las descargas PSP de RomM en `.iso` o `.cso` se guardan en `ux0:/pspemu/ISO/`. Los ZIP que contienen una sola imagen se extraen allí y luego se eliminan. Presiona `X` para iniciar el juego: si falta o está desactivado el complemento incluido, una segunda confirmación lo instala y lo habilita en Adrenaline. No hace falta instalar otra VPK ni crear un bubble adicional. `ms0:` es un alias de estilo PSP, no una carpeta visible en VitaShell: revisa `ux0:/pspemu/seplugins/`. Adrenaline 8.x también usa el formato EPI en `plugins.txt`. El complemento incluido es una variante de Pocket Shelf renombrada como `vitashelflauncher_pspboot.prx`; VitaShelf escribe la solicitud de arranque en `ux0:/pspemu/VitaShelfLauncher/boot.txt` y el registro en esa misma carpeta (en Adrenaline, `ms0:/VitaShelfLauncher/`). Si la instalación del complemento falla, consulta `ux0:data/vitashelflauncher/psp-plugin.log`; el aviso en pantalla incluye el código de error de Vita.
+
+### 4. Favoritos y filtros de biblioteca
 
 Presiona `SELECT` en la página principal de Biblioteca o dentro de una consola para abrir **Filtros**. Puedes mostrar juegos ocultos o limitar la biblioteca a juegos descargados; los filtros se comparten entre todas las consolas y se conservan al reiniciar. Dentro de una consola, `Cuadrado` abre las opciones para añadir o quitar favoritos y ocultar o mostrar el juego seleccionado. **Favoritos** aparece como la primera tarjeta de Biblioteca. Los juegos ocultos se muestran atenuados con un ojo tachado cuando el filtro permite verlos.
 
@@ -78,7 +82,7 @@ Presiona `SELECT` en la página principal de Biblioteca o dentro de una consola 
 
 The code is one-time use. Do not share the app configuration file: it contains the access token received. For paused downloads, press `X` to resume or `Square` to remove them from the queue.
 
-Settings are ordered as **Integrations**, **Downloads**, **Appearance**, and **About**. In **Appearance**, choose one of four wallpapers with the directional pad and `X`, or tap its thumbnail. **Text color** lets you pick white, light, dark, or black for better readability on light or dark wallpapers. **Animated wallpaper** has an on/off switch for the wallpaper's continuous drift; press `X` or tap the row to change it. All appearance preferences save automatically. The ROM view picked with `Triangle` (grid, list, or carousel) is saved and restored on the next launch too. **About** shows the version, free space, and storage paths; when RomM is connected, it also shows the server, its catalog game count, and the last synchronization. A server without a synchronized catalog is identified explicitly rather than showing another server's data.
+Settings are ordered as **Integrations**, **Downloads**, **Appearance**, and **About**. In **Appearance**, choose one of four wallpapers with the directional pad and `X`, or tap its thumbnail. **Text color** lets you pick white, light, dark, or black for better readability on light or dark wallpapers. **Animated wallpaper** has an on/off switch for the wallpaper's continuous drift; press `X` or tap the row to change it. All appearance preferences save automatically. The ROM view picked with `Triangle` (grid, list, or carousel) is saved and restored on the next launch too. **About** shows the version, free space, storage paths, and PSP ISO folder; when RomM is connected, it also shows the server, its catalog game count, and the last synchronization. A server without a synchronized catalog is identified explicitly rather than showing another server's data.
 
 ### 3. Installed Vita games and covers
 
@@ -91,7 +95,11 @@ For cover artwork, open **Settings → Integrations**:
 
 Artwork is resized through the shared image service and cached on the Vita. Only unambiguous name matches are selected; missing or ambiguous artwork keeps the installed application's icon. For locally installed titles, successful matches are remembered by title ID.
 
-### 4. Favourites and library filters
+### 4. PSP games from RomM
+
+With Adrenaline installed, RomM PSP downloads in `.iso` or `.cso` are stored in `ux0:/pspemu/ISO/`. A ZIP containing exactly one image is extracted there and then removed. Press `X` to start a game; if the bundled plugin is missing or disabled, a second confirmation installs and enables it in Adrenaline. No extra VPK or bubble is required. `ms0:` is a PSP-style alias, not a folder visible in VitaShell; check `ux0:/pspemu/seplugins/` instead. Adrenaline 8.x also uses the EPI format in `plugins.txt`. The bundled plugin is a renamed Pocket Shelf fork called `vitashelflauncher_pspboot.prx`; VitaShelf writes the boot request to `ux0:/pspemu/VitaShelfLauncher/boot.txt` and its log in that same folder (inside Adrenaline, `ms0:/VitaShelfLauncher/`). If plugin installation fails, check `ux0:data/vitashelflauncher/psp-plugin.log`; the on-screen notice includes the Vita error code.
+
+### 5. Favourites and library filters
 
 Press `SELECT` on the main Library page or inside a console to open **Filters**. Show hidden games or limit the library to downloaded games; filters are shared across consoles and saved across restarts. Inside a console, `Square` opens options to add or remove a favourite and hide or show the selected game. **Favourites** is the first Library card. When hidden games are shown, their cards are dimmed with a crossed-eye icon.
 
@@ -104,4 +112,4 @@ Human contributors: see [DEVELOPMENT.md](DEVELOPMENT.md). AI agents: begin with 
 VitaShelf Launcher is licensed under the GNU General Public License v3.0 — see [LICENSE](LICENSE).
 VitaShelf Launcher se distribuye bajo la GNU General Public License v3.0 — véase [LICENSE](LICENSE).
 
-Third-party asset notices are included under `assets/blueglass/`.
+Third-party asset notices are included under `assets/blueglass/` and `assets/psp/`.

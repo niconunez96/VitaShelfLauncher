@@ -104,6 +104,22 @@ class VitaRenderLifecycleTests(unittest.TestCase):
         step = function_body("static void covers_step(")
         self.assertNotIn("background_job_start", step)
 
+    def test_psp_x_launch_uses_the_bundled_plugin_without_a_bubble(self):
+        activate = function_body("static void activate_selected")
+        for call in ("vp_platform_is_psp", "vp_vita_psp_runtime_status",
+                     "vp_vita_psp_plugin_install", "vp_vita_write_psp_boot_request",
+                     'psgm:play?titleid=PSPEMUCFW'):
+            self.assertIn(call, activate)
+        self.assertIn("Presiona X otra vez para instalar el complemento PSP", activate)
+        self.assertIn("Instala Adrenaline (PSPEMUCFW)", activate)
+        psp = activate[activate.index("if (vp_platform_is_psp") :
+                       activate.index("if (item->installed && item->launch_target[0]")]
+        self.assertNotIn("snprintf(app->notice", psp)
+        for call in ("show_notification(app, \"%.150s\", error)",
+                     "show_notification(app, \"%.150s\", vp_vita_last_error())",
+                     "show_notification(app, \"No se pudo abrir Adrenaline"):
+            self.assertIn(call, psp)
+
 
 if __name__ == "__main__":
     unittest.main()
