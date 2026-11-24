@@ -81,6 +81,29 @@ class VitaPspRomStagingTests(unittest.TestCase):
         self.assertIn("resolved", poll[poll.index("completed->launch_target") - 200:])
 
 
+class VitaNdsRomStagingTests(unittest.TestCase):
+    def test_nds_roms_are_staged_in_dsvita(self):
+        self.assertIn('#define VP_DSVITA_ROOT "ux0:data/dsvita"', MAIN)
+        activate = function_source(MAIN, "static void activate_selected")
+        self.assertIn("vp_platform_is_nds(", activate)
+        self.assertIn("vp_vita_path_exists(VP_DSVITA_ROOT)", activate)
+        self.assertIn("ux0:data/dsvita para descargar juegos NDS", activate)
+        self.assertRegex(activate, r"vp_item_install_path\([^;]*VP_DSVITA_ROOT")
+        refresh = function_source(MAIN, "static bool installed_item_path")
+        self.assertIn("vp_platform_is_nds(", refresh)
+        self.assertIn("VP_DSVITA_ROOT", refresh)
+        self.assertIn('"nds"', refresh)
+
+    def test_nds_zip_is_extracted_before_launch_target_is_set(self):
+        worker = function_source(MAIN, "static void *background_job_run")
+        self.assertIn("vp_vita_extract_nds_archive(", worker)
+        self.assertIn("vp_platform_is_nds(item.platform)", worker)
+        self.assertIn("VP_DSVITA_ROOT", worker)
+        poll = function_source(MAIN, "static void background_job_poll")
+        self.assertIn("completed->launch_target", poll)
+        self.assertIn("resolved", poll[poll.index("completed->launch_target") - 200:])
+
+
 class VitaAppEventPollingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

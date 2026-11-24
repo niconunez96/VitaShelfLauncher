@@ -53,6 +53,7 @@
 #define VP_ARTWORK_CACHE "ux0:data/vitashelflauncher/cache/covers"
 #define VP_DOWNLOAD_ROOT "ux0:data/vitashelflauncher/downloads"
 #define VP_PSP_ISO_ROOT "ux0:pspemu/ISO"
+#define VP_DSVITA_ROOT "ux0:data/dsvita"
 #define VP_TOUCH_WIDTH 1920
 #define VP_TOUCH_HEIGHT 1088
 #define VP_TOUCH_TAP_SLOP 32
@@ -645,6 +646,12 @@ static bool installed_item_path(const VpItem *item, char *path, size_t capacity)
         return vp_item_psp_image_path(item, VP_PSP_ISO_ROOT, "cso", path, capacity) &&
                file_exists(path);
     }
+    if (vp_platform_is_nds(item->platform)) {
+        if (vp_item_nds_rom_path(item, VP_DSVITA_ROOT, "nds", path, capacity) && file_exists(path))
+            return true;
+        return vp_item_nds_rom_path(item, VP_DSVITA_ROOT, NULL, path, capacity) &&
+               file_exists(path);
+    }
     return vp_item_download_path(item, VP_DOWNLOAD_ROOT, path, capacity) && file_exists(path);
 }
 
@@ -878,6 +885,15 @@ static void *background_job_run(void *context) {
             if (vp_item_extension(&item, extension, sizeof(extension)) &&
                 strcmp(extension, "zip") == 0) {
                 succeeded = vp_vita_extract_psp_archive(&item, destination, VP_PSP_ISO_ROOT,
+                                                         resolved, sizeof(resolved));
+                if (!succeeded) (void)sceIoRemove(destination);
+            }
+        }
+        if (succeeded && kind == VP_JOB_DOWNLOAD_ROM && vp_platform_is_nds(item.platform)) {
+            char extension[VP_DOWNLOAD_EXTENSION];
+            if (vp_item_extension(&item, extension, sizeof(extension)) &&
+                strcmp(extension, "zip") == 0) {
+                succeeded = vp_vita_extract_nds_archive(&item, destination, VP_DSVITA_ROOT,
                                                          resolved, sizeof(resolved));
                 if (!succeeded) (void)sceIoRemove(destination);
             }
@@ -2137,7 +2153,12 @@ static void activate_selected(VpApp *app) {
                            "RomM no expuso un archivo descargable para esta ROM");
             return;
         }
-        if (!vp_item_install_path(item, VP_DOWNLOAD_ROOT, VP_PSP_ISO_ROOT, path, sizeof(path))) {
+        if (vp_platform_is_nds(item->platform) && !vp_vita_path_exists(VP_DSVITA_ROOT)) {
+            show_notification(app, "Se necesita la carpeta ux0:data/dsvita para descargar juegos NDS");
+            return;
+        }
+        if (!vp_item_install_path(item, VP_DOWNLOAD_ROOT, VP_PSP_ISO_ROOT, VP_DSVITA_ROOT,
+                                  path, sizeof(path))) {
             (void)snprintf(app->notice, sizeof(app->notice), "No se pudo preparar el nombre de descarga");
             return;
         }

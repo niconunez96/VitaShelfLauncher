@@ -297,10 +297,13 @@ bool vp_item_extension(const VpItem *item, char *destination, size_t capacity);
 bool vp_item_download_path(const VpItem *item, const char *directory,
                            char *destination, size_t capacity);
 bool vp_platform_is_psp(const char *platform);
+bool vp_platform_is_nds(const char *platform);
 bool vp_item_psp_image_path(const VpItem *item, const char *psp_root,
                             const char *extension, char *destination, size_t capacity);
+bool vp_item_nds_rom_path(const VpItem *item, const char *nds_root,
+                          const char *extension, char *destination, size_t capacity);
 bool vp_item_install_path(const VpItem *item, const char *directory, const char *psp_root,
-                          char *destination, size_t capacity);
+                          const char *dsvita_root, char *destination, size_t capacity);
 bool vp_build_launch_uri(const VpLaunchProfile *profile, const char *rom_path,
                          char *destination, size_t capacity);
 

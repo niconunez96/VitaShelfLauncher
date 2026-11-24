@@ -58,7 +58,11 @@ Los ajustes se ordenan en **Integraciones**, **Descargas**, **Apariencia** y **A
 
 Con Adrenaline instalado, las descargas PSP de RomM en `.iso` o `.cso` se guardan en `ux0:/pspemu/ISO/`. Los ZIP que contienen una sola imagen se extraen allí y luego se eliminan. Presiona `X` para iniciar el juego: si falta o está desactivado el complemento incluido, una segunda confirmación lo instala y lo habilita en Adrenaline. No hace falta instalar otra VPK ni crear un bubble adicional. `ms0:` es un alias de estilo PSP, no una carpeta visible en VitaShell: revisa `ux0:/pspemu/seplugins/`. Adrenaline 8.x también usa el formato EPI en `plugins.txt`. El complemento incluido es una variante de Pocket Shelf renombrada como `vitashelf.prx`; VitaShelf escribe la solicitud de arranque en `ux0:/pspemu/VitaShelfLauncher/boot.txt` y el registro en esa misma carpeta (en Adrenaline, `ms0:/VitaShelfLauncher/`). Si la instalación del complemento falla, consulta `ux0:data/vitashelflauncher/psp-plugin.log`; el aviso en pantalla incluye el código de error de Vita.
 
-### 4. Favoritos y filtros de biblioteca
+### 4. Juegos NDS desde RomM
+
+Las descargas NDS de RomM se guardan en `ux0:/data/dsvita/` con la extensión del archivo original. Si el ZIP contiene una sola ROM `.nds`, se extrae allí y luego se elimina. Para iniciar el juego necesitas dsVita y la entrada `launch_nds=<titleid>` en `config.ini`. La carpeta `ux0:/data/dsvita/` debe existir antes de descargar: si falta, la app muestra un aviso y no inicia la descarga.
+
+### 5. Favoritos y filtros de biblioteca
 
 Presiona `SELECT` en la página principal de Biblioteca o dentro de una consola para abrir **Filtros**. Puedes mostrar juegos ocultos o limitar la biblioteca a juegos descargados; los filtros se comparten entre todas las consolas y se conservan al reiniciar. Dentro de una consola, `Cuadrado` abre las opciones para añadir o quitar favoritos y ocultar o mostrar el juego seleccionado. **Favoritos** aparece como la primera tarjeta de Biblioteca. Los juegos ocultos se muestran atenuados con un ojo tachado cuando el filtro permite verlos.
 
@@ -99,7 +103,11 @@ Artwork is resized through the shared image service and cached on the Vita. Only
 
 With Adrenaline installed, RomM PSP downloads in `.iso` or `.cso` are stored in `ux0:/pspemu/ISO/`. A ZIP containing exactly one image is extracted there and then removed. Press `X` to start a game; if the bundled plugin is missing or disabled, a second confirmation installs and enables it in Adrenaline. No extra VPK or bubble is required. `ms0:` is a PSP-style alias, not a folder visible in VitaShell; check `ux0:/pspemu/seplugins/` instead. Adrenaline 8.x also uses the EPI format in `plugins.txt`. The bundled plugin is a renamed Pocket Shelf fork called `vitashelf.prx`; VitaShelf writes the boot request to `ux0:/pspemu/VitaShelfLauncher/boot.txt` and its log in that same folder (inside Adrenaline, `ms0:/VitaShelfLauncher/`). If plugin installation fails, check `ux0:data/vitashelflauncher/psp-plugin.log`; the on-screen notice includes the Vita error code.
 
-### 5. Favourites and library filters
+### 5. NDS games from RomM
+
+RomM NDS downloads are stored in `ux0:/data/dsvita/` with the source file extension. A ZIP containing exactly one `.nds` ROM is extracted there and then removed. Launching requires dsVita and a `launch_nds=<titleid>` entry in `config.ini`. The `ux0:/data/dsvita/` folder must already exist: if it is missing, the app shows a notice and does not start the download.
+
+### 6. Favourites and library filters
 
 Press `SELECT` on the main Library page or inside a console to open **Filters**. Show hidden games or limit the library to downloaded games; filters are shared across consoles and saved across restarts. Inside a console, `Square` opens options to add or remove a favourite and hide or show the selected game. **Favourites** is the first Library card. When hidden games are shown, their cards are dimmed with a crossed-eye icon.
 

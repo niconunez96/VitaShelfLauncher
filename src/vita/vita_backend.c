@@ -479,6 +479,156 @@ static bool path_file_size(const char *path, uint64_t *size) {
     return true;
 }
 
+bool vp_vita_path_exists(const char *path) {
+    return path_exists(path);
+}
+
+#define VP_NDS_ARCHIVE_MAX_SIZE (2ULL * 1024ULL * 1024ULL * 1024ULL)
+
+static bool nds_archive_entry(const char *entry) {
+    const char *name;
+    const char *cursor;
+    const char *dot = NULL;
+    const char *end;
+    size_t length;
+    size_t index;
+
+    if (entry == NULL) return false;
+    name = entry;
+    for (cursor = entry; *cursor != '\0'; cursor++) {
+        if (*cursor == '/' || *cursor == '\\') name = cursor + 1;
+        if (*cursor < 0x20 || *cursor == ':') return false;
+    }
+    end = name + strlen(name);
+    for (cursor = name; cursor < end; cursor++) if (*cursor == '.') dot = cursor;
+    if (dot == NULL || dot + 1 >= end) return false;
+    length = (size_t)(end - (dot + 1));
+    if (length != 3) return false;
+    for (index = 0; index < length; index++)
+        if (tolower((unsigned char)dot[1 + index]) != "nds"[index]) return false;
+    return true;
+}
+
+bool vp_vita_extract_nds_archive(const VpItem *item, const char *archive_path,
+                                 const char *nds_root, char *resolved,
+                                 size_t resolved_capacity) {
+    int error = 0;
+    zip_t *archive;
+    zip_int64_t count;
+    zip_int64_t selected = -1;
+    zip_file_t *input = NULL;
+    SceUID output_fd = -1;
+    char final_path[VP_PATH];
+    char partial_path[VP_PATH + 8];
+    zip_stat_t info;
+
+    vp_vita_set_error(NULL);
+    if (item == NULL || archive_path == NULL || nds_root == NULL ||
+        resolved == NULL || resolved_capacity == 0) {
+        vp_vita_set_error("No se pudo preparar la extraccion NDS");
+        return false;
+    }
+    archive = zip_open(archive_path, ZIP_RDONLY, &error);
+    if (archive == NULL) {
+        vp_vita_set_error("No se pudo abrir el ZIP de la ROM NDS");
+        return false;
+    }
+    count = zip_get_num_entries(archive, 0);
+    if (count <= 0 || count > 128) {
+        zip_close(archive);
+        vp_vita_set_error("El ZIP de la ROM NDS tiene una cantidad de archivos invalida");
+        return false;
+    }
+    for (zip_int64_t index = 0; index < count; index++) {
+        const char *entry = zip_get_name(archive, (zip_uint64_t)index, 0);
+        if (entry == NULL || entry[0] == '\0' || has_unsafe_path(entry) ||
+            strncmp(entry, "__MACOSX/", 9) == 0 || entry[0] == '.') continue;
+        if (entry[strlen(entry) - 1] == '/') continue;
+        if (!nds_archive_entry(entry)) continue;
+        if (zip_stat_index(archive, (zip_uint64_t)index, 0, &info) == 0 &&
+            info.size > VP_NDS_ARCHIVE_MAX_SIZE) {
+            zip_close(archive);
+            vp_vita_set_error("La ROM NDS del ZIP es demasiado grande");
+            return false;
+        }
+        if (selected >= 0) {
+            zip_close(archive);
+            vp_vita_set_error("El ZIP contiene mas de una ROM NDS");
+            return false;
+        }
+        selected = index;
+    }
+    if (selected < 0) {
+        zip_close(archive);
+        vp_vita_set_error("El ZIP no contiene una ROM NDS");
+        return false;
+    }
+    if (!vp_item_nds_rom_path(item, nds_root, "nds", final_path, sizeof(final_path)) ||
+        snprintf(partial_path, sizeof(partial_path), "%s.part", final_path) >=
+            (int)sizeof(partial_path)) {
+        zip_close(archive);
+        vp_vita_set_error("No se pudo preparar la ruta de extraccion NDS");
+        return false;
+    }
+    if (!make_parent_dirs(partial_path)) {
+        zip_close(archive);
+        vp_vita_set_error("No se pudo crear el directorio de ROMs NDS");
+        return false;
+    }
+    input = zip_fopen_index(archive, (zip_uint64_t)selected, 0);
+    output_fd = sceIoOpen(partial_path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+    if (input == NULL || output_fd < 0) {
+        if (input != NULL) (void)zip_fclose(input);
+        if (output_fd >= 0) (void)sceIoClose(output_fd);
+        zip_close(archive);
+        (void)sceIoRemove(partial_path);
+        vp_vita_set_error("No se pudo iniciar la extraccion NDS");
+        return false;
+    }
+    for (;;) {
+        zip_int64_t read_count = zip_fread(input, extract_block, sizeof(extract_block));
+        size_t offset = 0;
+        if (read_count < 0) {
+            (void)zip_fclose(input);
+            (void)sceIoClose(output_fd);
+            zip_close(archive);
+            (void)sceIoRemove(partial_path);
+            vp_vita_set_error("Falló la lectura del ZIP NDS");
+            return false;
+        }
+        if (read_count == 0) break;
+        while (offset < (size_t)read_count) {
+            int write_count = sceIoWrite(output_fd, extract_block + offset,
+                                         (size_t)read_count - offset);
+            if (write_count <= 0) {
+                (void)zip_fclose(input);
+                (void)sceIoClose(output_fd);
+                zip_close(archive);
+                (void)sceIoRemove(partial_path);
+                vp_vita_set_error("No se pudo escribir la ROM NDS extraida");
+                return false;
+            }
+            offset += (size_t)write_count;
+        }
+    }
+    if (zip_fclose(input) != 0 || sceIoClose(output_fd) < 0) {
+        zip_close(archive);
+        (void)sceIoRemove(partial_path);
+        vp_vita_set_error("No se pudo cerrar la ROM NDS extraida");
+        return false;
+    }
+    zip_close(archive);
+    (void)sceIoRemove(final_path);
+    if (sceIoRename(partial_path, final_path) < 0) {
+        (void)sceIoRemove(partial_path);
+        vp_vita_set_error("No se pudo instalar la ROM NDS extraida");
+        return false;
+    }
+    (void)sceIoRemove(archive_path);
+    (void)snprintf(resolved, resolved_capacity, "%s", final_path);
+    return true;
+}
+
 static bool copy_whole_file_with_status(const char *source, const char *destination, int *failure_code) {
     SceUID input = -1;
     SceUID output = -1;

@@ -14,8 +14,12 @@ long vp_vita_probe_service(const char *url, const char *bearer_token,
                            char *response, size_t response_capacity, void *context);
 const char *vp_vita_last_error(void);
 void vp_vita_set_error(const char *message);
+bool vp_vita_path_exists(const char *path);
 bool vp_vita_extract_psp_archive(const VpItem *item, const char *archive_path,
                                  const char *psp_root, char *resolved,
+                                 size_t resolved_capacity);
+bool vp_vita_extract_nds_archive(const VpItem *item, const char *archive_path,
+                                 const char *nds_root, char *resolved,
                                  size_t resolved_capacity);
 bool vp_vita_psp_runtime_status(bool *adrenaline_installed, bool *plugin_installed,
                                 bool *plugin_enabled);

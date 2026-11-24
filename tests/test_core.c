@@ -1114,7 +1114,7 @@ static void test_psp_install_paths(void) {
     (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "God of War.iso");
 
     assert(vp_item_install_path(&item, "ux0:data/vitashelflauncher/downloads", "ux0:pspemu/ISO",
-                                path, sizeof(path)));
+                                "ux0:data/dsvita", path, sizeof(path)));
     assert(strcmp(path, "ux0:pspemu/ISO/godofwar_42.iso") == 0);
     (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "God of War.cso");
     assert(vp_item_psp_image_path(&item, "ux0:pspemu/ISO", "cso", path, sizeof(path)));
@@ -1123,15 +1123,50 @@ static void test_psp_install_paths(void) {
                    "https://romm.local/api/roms/42/content/game.zip");
     item.fs_name[0] = '\0';
     assert(vp_item_install_path(&item, "ux0:data/vitashelflauncher/downloads", "ux0:pspemu/ISO",
-                                path, sizeof(path)));
+                                "ux0:data/dsvita", path, sizeof(path)));
     assert(strcmp(path, "ux0:pspemu/ISO/godofwar_42.zip") == 0);
     assert(vp_item_psp_image_path(&item, "ux0:pspemu/ISO", "iso", path, sizeof(path)));
     assert(strcmp(path, "ux0:pspemu/ISO/godofwar_42.iso") == 0);
 
     (void)snprintf(item.platform, sizeof(item.platform), "%s", "snes");
     assert(vp_item_install_path(&item, "ux0:data/vitashelflauncher/downloads", "ux0:pspemu/ISO",
-                                path, sizeof(path)));
+                                "ux0:data/dsvita", path, sizeof(path)));
     assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/snes/godofwar_42.zip") == 0);
+}
+
+static void test_nds_install_paths(void) {
+    VpItem item;
+    char path[VP_PATH];
+    assert(vp_platform_is_nds("NDS"));
+    assert(vp_platform_is_nds("ds"));
+    assert(vp_platform_is_nds("Nintendo DS"));
+    assert(vp_platform_is_nds("nintendo-ds"));
+    assert(!vp_platform_is_nds("snes"));
+    assert(!vp_platform_is_nds(NULL));
+
+    memset(&item, 0, sizeof(item));
+    item.source = VP_SOURCE_ROMM;
+    (void)snprintf(item.id, sizeof(item.id), "%s", "romm:7");
+    (void)snprintf(item.remote_id, sizeof(item.remote_id), "%s", "7");
+    (void)snprintf(item.platform, sizeof(item.platform), "%s", "nds");
+    (void)snprintf(item.title, sizeof(item.title), "%s", "Metroid");
+    (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "Metroid.nds");
+
+    assert(vp_item_install_path(&item, "ux0:data/vitashelflauncher/downloads", "ux0:pspemu/ISO",
+                                "ux0:data/dsvita", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/dsvita/metroid_7.nds") == 0);
+    assert(vp_item_nds_rom_path(&item, "ux0:data/dsvita", "nds", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/dsvita/metroid_7.nds") == 0);
+
+    (void)snprintf(item.fs_name, sizeof(item.fs_name), "%s", "Metroid.zip");
+    assert(vp_item_install_path(&item, "ux0:data/vitashelflauncher/downloads", "ux0:pspemu/ISO",
+                                "ux0:data/dsvita", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/dsvita/metroid_7.zip") == 0);
+
+    (void)snprintf(item.platform, sizeof(item.platform), "%s", "snes");
+    assert(vp_item_install_path(&item, "ux0:data/vitashelflauncher/downloads", "ux0:pspemu/ISO",
+                                "ux0:data/dsvita", path, sizeof(path)));
+    assert(strcmp(path, "ux0:data/vitashelflauncher/downloads/snes/metroid_7.zip") == 0);
 }
 
 int main(void) {
@@ -1147,6 +1182,7 @@ int main(void) {
     test_romm_null_cover_chain_clears();
     test_download_paths();
     test_psp_install_paths();
+    test_nds_install_paths();
     test_launch_profiles();
     test_romm_content_download();
     test_url_escape();

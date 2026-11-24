@@ -60,6 +60,18 @@ class VitaDownloadTuningTests(unittest.TestCase):
         self.assertIn("VP_PSP_ARCHIVE_MAX_SIZE", extract)
         self.assertIn("El ZIP contiene mas de una imagen ISO/CSO", extract)
 
+    def test_nds_zip_extraction_is_bounded_and_atomic(self):
+        extract = function_source("bool vp_vita_extract_nds_archive")
+        for call in ("zip_open", "zip_get_num_entries", "has_unsafe_path",
+                     "nds_archive_entry", "sceIoRename", "sceIoRemove(partial_path)",
+                     "sceIoRemove(archive_path)"):
+            self.assertIn(call, extract)
+        self.assertIn("VP_NDS_ARCHIVE_MAX_SIZE", extract)
+        self.assertIn("El ZIP no contiene una ROM NDS", extract)
+        self.assertIn("vp_item_nds_rom_path", extract)
+        path_check = function_source("bool vp_vita_path_exists")
+        self.assertIn("return path_exists(path);", path_check)
+
     def test_vitashelf_psp_plugin_request_matches_fork_contract(self):
         for define in ('#define VP_PSP_PLUGIN_SOURCE "app0:psp/vitashelf.prx"',
                        '#define VP_PSP_SE_ROOT "ux0:/pspemu/seplugins"',
