@@ -18,8 +18,8 @@
   Upstream authorship and licensing were not specified; no ownership or new license is claimed.
   Processing removes top-edge remnants, crops without distortion, and resizes to 960×544 with 240×136 thumbnails.
   Source hashes and crop bounds are recorded in `wallpapers/provenance.json` (also bundled).
-- **RomM settings icon**: the previously accepted circular PNG from
-  `assets/aurora/ui_icons/ui_romm.png`, restored byte-for-byte without recoloring.
+- **RomM settings icon**: the previously accepted circular PNG bundled at
+  `ui/ui_romm.png`, retained byte-for-byte without recoloring.
   The symbol belongs to the RomM project, https://github.com/rommapp/romm/tree/master/frontend/assets.
   Original raster Git blob: `491e995d35661dbdc4f87cd2960f2ff87a336cf5`;
   original SVG Git blob: `bc212d664f66168853e43545efb6489d00b07b09`.

@@ -51,7 +51,7 @@
 #include <psploadexec_kernel.h>
 #include <string.h>
 
-PSP_MODULE_INFO("VitaShelfPspBoot", 0x1000, 1, 0);
+PSP_MODULE_INFO("VitaShelfBoot", 0x1000, 1, 0);
 
 /* SystemCtrlForKernel, in both Adrenalines. */
 typedef int (*StartModuleHandler)(void *module);
@@ -574,7 +574,7 @@ int module_start(SceSize args, void *argp) {
 		return 0;
 	}
 	previous_handler = sctrlHENSetStartModuleHandler(on_module_start);
-	SceUID thread = sceKernelCreateThread("VitaShelfPspBoot", boot_thread, 0x18, 0x1000, 0, NULL);
+	SceUID thread = sceKernelCreateThread("VitaShelfBoot", boot_thread, 0x18, 0x1000, 0, NULL);
 	if (thread >= 0) {
 		sceKernelStartThread(thread, 0, NULL);
 	}

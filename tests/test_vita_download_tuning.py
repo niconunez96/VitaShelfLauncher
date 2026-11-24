@@ -61,12 +61,14 @@ class VitaDownloadTuningTests(unittest.TestCase):
         self.assertIn("El ZIP contiene mas de una imagen ISO/CSO", extract)
 
     def test_vitashelf_psp_plugin_request_matches_fork_contract(self):
-        for define in ('#define VP_PSP_PLUGIN_SOURCE "app0:psp/vitashelflauncher_pspboot.prx"',
+        for define in ('#define VP_PSP_PLUGIN_SOURCE "app0:psp/vitashelf.prx"',
                        '#define VP_PSP_SE_ROOT "ux0:/pspemu/seplugins"',
-                       '#define VP_PSP_PLUGIN_TARGET "ux0:/pspemu/seplugins/vitashelflauncher_pspboot.prx"',
-                       '#define VP_PSP_PLUGIN_PSP_PATH "ms0:/seplugins/vitashelflauncher_pspboot.prx"',
-                       '#define VP_PSP_PLUGIN_LINE_CLASSIC "ms0:/seplugins/vitashelflauncher_pspboot.prx 1"',
-                       '#define VP_PSP_PLUGIN_LINE_EPI "xmb, ms0:/seplugins/vitashelflauncher_pspboot.prx, on"',
+                       '#define VP_PSP_PLUGIN_TARGET "ux0:/pspemu/seplugins/vitashelf.prx"',
+                       '#define VP_PSP_PLUGIN_PSP_PATH "ms0:/seplugins/vitashelf.prx"',
+                       '#define VP_PSP_PLUGIN_LINE_CLASSIC "ms0:/seplugins/vitashelf.prx 1"',
+                       '#define VP_PSP_PLUGIN_LINE_EPI "xmb, ms0:/seplugins/vitashelf.prx, on"',
+                       '#define VP_PSP_PLUGIN_LEGACY_NAME "vitashelflauncher_pspboot.prx"',
+                       '#define VP_PSP_PLUGIN_LEGACY_TARGET "ux0:/pspemu/seplugins/vitashelflauncher_pspboot.prx"',
                        '#define VP_PSP_VSH_PLUGINS "ux0:/pspemu/seplugins/vsh.txt"',
                        '#define VP_PSP_EPI_PLUGINS "ux0:/pspemu/seplugins/EPIplugins.txt"',
                        '#define VP_PSP_SE_PLUGINS "ux0:/pspemu/seplugins/plugins.txt"',
@@ -84,6 +86,12 @@ class VitaDownloadTuningTests(unittest.TestCase):
         self.assertIn("ensure_psp_plugin_dirs", install)
         self.assertIn("copy_whole_file_with_status", install)
         self.assertIn("psp_plugin_copy_failed", install)
+        self.assertIn("VP_PSP_PLUGIN_LEGACY_TARGET", install)
+        self.assertIn("sceIoRemove(VP_PSP_PLUGIN_LEGACY_TARGET)", install)
+        mentions = function_source("static bool line_mentions_plugin")
+        self.assertIn("VP_PSP_PLUGIN_LEGACY_NAME", mentions)
+        enables = function_source("static bool line_enables_plugin")
+        self.assertNotIn("VP_PSP_PLUGIN_LEGACY_NAME", enables)
         dirs = function_source("static void ensure_psp_plugin_dirs")
         self.assertIn("sceIoMkdir(VP_PSP_SE_ROOT, 0777)", dirs)
         self.assertNotIn('sceIoMkdir("ms0:/seplugins", 0777)', dirs)
@@ -111,50 +119,57 @@ class VitaDownloadTuningTests(unittest.TestCase):
 
     def test_vitashelf_psp_assets_are_packaged_with_pinned_provenance(self):
         cmake = (ROOT / "CMakeLists.txt").read_text()
-        for entry in ("assets/psp/vitashelflauncher_pspboot.prx psp/vitashelflauncher_pspboot.prx",
-                      "assets/psp/LICENSE.txt assets/licenses/VitaShelfLauncher-PSPBoot-LICENSE.txt",
-                      "assets/psp/THIRD_PARTY_NOTICES.txt assets/licenses/VitaShelfLauncher-PSPBoot-THIRD_PARTY_NOTICES.txt",
-                      "assets/psp/provenance.json assets/licenses/VitaShelfLauncher-PSPBoot-provenance.json"):
+        for entry in ("assets/bin/psp/vitashelf.prx psp/vitashelf.prx",
+                      "assets/bin/psp/LICENSE.txt assets/licenses/VitaShelfLauncher-PSPBoot-LICENSE.txt",
+                      "assets/bin/psp/THIRD_PARTY_NOTICES.txt assets/licenses/VitaShelfLauncher-PSPBoot-THIRD_PARTY_NOTICES.txt",
+                      "assets/bin/psp/provenance.json assets/licenses/VitaShelfLauncher-PSPBoot-provenance.json"):
             self.assertIn(entry, cmake)
-        prx = (ROOT / "assets/psp/vitashelflauncher_pspboot.prx").read_bytes()
+        prx = (ROOT / "assets/bin/psp/vitashelf.prx").read_bytes()
         self.assertEqual(len(prx), 13158)
         self.assertEqual(hashlib.sha256(prx).hexdigest(),
-                         "63065280e04be8434f36f018f45a3d367f005a99cb946fdfe6f9a44156b1ef48")
-        provenance = json.loads((ROOT / "assets/psp/provenance.json").read_text())
+                         "5bd16cf846d3c3a38b760f23570536efb78fcd06e7b7e58ebb77e464ffd3749b")
+        provenance = json.loads((ROOT / "assets/bin/psp/provenance.json").read_text())
         self.assertEqual(provenance["upstream_project"], "fthdgn-gh/pocket-shelf")
         self.assertEqual(provenance["upstream_tag"], "shelf-v0.6.1-beta.3")
         self.assertEqual(provenance["upstream_commit"],
                          "2af22cc2013707a9e1ab76cdfc32fb603cb92df6")
-        self.assertEqual(provenance["artifact"], "vitashelflauncher_pspboot.prx")
+        self.assertEqual(provenance["vendored_source"],
+                         "vendor/vitashelf-psp-boot/vitashelf-psp-boot")
+        self.assertEqual(provenance["artifact"], "vitashelf.prx")
+        self.assertEqual(provenance["prx_path_in_vpk"], "psp/vitashelf.prx")
         self.assertEqual(provenance["prx_sha256"], hashlib.sha256(prx).hexdigest())
-        self.assertIn("MIT License", (ROOT / "assets/psp/LICENSE.txt").read_text())
-        self.assertTrue((ROOT / "assets/psp/THIRD_PARTY_NOTICES.txt").stat().st_size > 0)
+        self.assertIn("VitaShelfBoot", provenance["notes"])
+        self.assertIn("MIT License", (ROOT / "assets/bin/psp/LICENSE.txt").read_text())
+        self.assertTrue((ROOT / "assets/bin/psp/THIRD_PARTY_NOTICES.txt").stat().st_size > 0)
 
     def test_vendored_psp_boot_source_is_renamed_and_attributed(self):
-        source = ROOT / "vendor" / "pocket-shelf-psp-boot"
-        main = (source / "psp-boot" / "main.c").read_text()
-        makefile = (source / "psp-boot" / "Makefile").read_text()
-        exports = (source / "psp-boot" / "exports.exp").read_text()
+        source = ROOT / "vendor" / "vitashelf-psp-boot"
+        plugin = source / "vitashelf-psp-boot"
+        main = (plugin / "main.c").read_text()
+        makefile = (plugin / "Makefile").read_text()
+        exports = (plugin / "exports.exp").read_text()
         readme = (source / "README.md").read_text()
         license_text = (source / "LICENSE").read_text()
         build = (ROOT / "scripts" / "build-psp-plugin.sh").read_text()
 
-        self.assertIn('PSP_MODULE_INFO("VitaShelfPspBoot", 0x1000, 1, 0);', main)
+        self.assertIn('PSP_MODULE_INFO("VitaShelfBoot", 0x1000, 1, 0);', main)
         self.assertIn('#define REQUEST_PATH "ms0:/VitaShelfLauncher/boot.txt"', main)
         self.assertIn('#define LOG_PATH "ms0:/VitaShelfLauncher/boot.log"', main)
-        self.assertIn('sceKernelCreateThread("VitaShelfPspBoot"', main)
+        self.assertIn('sceKernelCreateThread("VitaShelfBoot"', main)
         self.assertNotIn("PocketShelfBoot", main)
+        self.assertNotIn("VitaShelfPspBoot", main)
         self.assertNotIn("ms0:/PocketShelf", main)
-        self.assertIn("TARGET = vitashelflauncher_pspboot", makefile)
+        self.assertIn("TARGET = vitashelf", makefile)
         self.assertIn("PRX_EXPORTS = exports.exp", makefile)
         self.assertIn("PSP_EXPORT_FUNC_HASH(module_start)", exports)
         self.assertIn("fthdgn-gh/pocket-shelf", readme)
         self.assertIn("shelf-v0.6.1-beta.3", readme)
         self.assertIn("2af22cc2013707a9e1ab76cdfc32fb603cb92df6", readme)
+        self.assertIn("assets/bin/psp/vitashelf.prx", readme)
         self.assertIn("MIT License", license_text)
         self.assertIn("Copyright (c) 2026 fthdgn", license_text)
         self.assertIn("pspdev/pspdev", build)
-        self.assertIn("assets/psp/vitashelflauncher_pspboot.prx", build)
+        self.assertIn("assets/bin/psp/vitashelf.prx", build)
 
 
 if __name__ == "__main__":

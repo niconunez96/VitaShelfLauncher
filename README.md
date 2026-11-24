@@ -56,7 +56,7 @@ Los ajustes se ordenan en **Integraciones**, **Descargas**, **Apariencia** y **A
 
 ### 3. Juegos PSP desde RomM
 
-Con Adrenaline instalado, las descargas PSP de RomM en `.iso` o `.cso` se guardan en `ux0:/pspemu/ISO/`. Los ZIP que contienen una sola imagen se extraen allí y luego se eliminan. Presiona `X` para iniciar el juego: si falta o está desactivado el complemento incluido, una segunda confirmación lo instala y lo habilita en Adrenaline. No hace falta instalar otra VPK ni crear un bubble adicional. `ms0:` es un alias de estilo PSP, no una carpeta visible en VitaShell: revisa `ux0:/pspemu/seplugins/`. Adrenaline 8.x también usa el formato EPI en `plugins.txt`. El complemento incluido es una variante de Pocket Shelf renombrada como `vitashelflauncher_pspboot.prx`; VitaShelf escribe la solicitud de arranque en `ux0:/pspemu/VitaShelfLauncher/boot.txt` y el registro en esa misma carpeta (en Adrenaline, `ms0:/VitaShelfLauncher/`). Si la instalación del complemento falla, consulta `ux0:data/vitashelflauncher/psp-plugin.log`; el aviso en pantalla incluye el código de error de Vita.
+Con Adrenaline instalado, las descargas PSP de RomM en `.iso` o `.cso` se guardan en `ux0:/pspemu/ISO/`. Los ZIP que contienen una sola imagen se extraen allí y luego se eliminan. Presiona `X` para iniciar el juego: si falta o está desactivado el complemento incluido, una segunda confirmación lo instala y lo habilita en Adrenaline. No hace falta instalar otra VPK ni crear un bubble adicional. `ms0:` es un alias de estilo PSP, no una carpeta visible en VitaShell: revisa `ux0:/pspemu/seplugins/`. Adrenaline 8.x también usa el formato EPI en `plugins.txt`. El complemento incluido es una variante de Pocket Shelf renombrada como `vitashelf.prx`; VitaShelf escribe la solicitud de arranque en `ux0:/pspemu/VitaShelfLauncher/boot.txt` y el registro en esa misma carpeta (en Adrenaline, `ms0:/VitaShelfLauncher/`). Si la instalación del complemento falla, consulta `ux0:data/vitashelflauncher/psp-plugin.log`; el aviso en pantalla incluye el código de error de Vita.
 
 ### 4. Favoritos y filtros de biblioteca
 
@@ -97,7 +97,7 @@ Artwork is resized through the shared image service and cached on the Vita. Only
 
 ### 4. PSP games from RomM
 
-With Adrenaline installed, RomM PSP downloads in `.iso` or `.cso` are stored in `ux0:/pspemu/ISO/`. A ZIP containing exactly one image is extracted there and then removed. Press `X` to start a game; if the bundled plugin is missing or disabled, a second confirmation installs and enables it in Adrenaline. No extra VPK or bubble is required. `ms0:` is a PSP-style alias, not a folder visible in VitaShell; check `ux0:/pspemu/seplugins/` instead. Adrenaline 8.x also uses the EPI format in `plugins.txt`. The bundled plugin is a renamed Pocket Shelf fork called `vitashelflauncher_pspboot.prx`; VitaShelf writes the boot request to `ux0:/pspemu/VitaShelfLauncher/boot.txt` and its log in that same folder (inside Adrenaline, `ms0:/VitaShelfLauncher/`). If plugin installation fails, check `ux0:data/vitashelflauncher/psp-plugin.log`; the on-screen notice includes the Vita error code.
+With Adrenaline installed, RomM PSP downloads in `.iso` or `.cso` are stored in `ux0:/pspemu/ISO/`. A ZIP containing exactly one image is extracted there and then removed. Press `X` to start a game; if the bundled plugin is missing or disabled, a second confirmation installs and enables it in Adrenaline. No extra VPK or bubble is required. `ms0:` is a PSP-style alias, not a folder visible in VitaShell; check `ux0:/pspemu/seplugins/` instead. Adrenaline 8.x also uses the EPI format in `plugins.txt`. The bundled plugin is a renamed Pocket Shelf fork called `vitashelf.prx`; VitaShelf writes the boot request to `ux0:/pspemu/VitaShelfLauncher/boot.txt` and its log in that same folder (inside Adrenaline, `ms0:/VitaShelfLauncher/`). If plugin installation fails, check `ux0:data/vitashelflauncher/psp-plugin.log`; the on-screen notice includes the Vita error code.
 
 ### 5. Favourites and library filters
 
@@ -112,4 +112,4 @@ Human contributors: see [DEVELOPMENT.md](DEVELOPMENT.md). AI agents: begin with 
 VitaShelf Launcher is licensed under the GNU General Public License v3.0 — see [LICENSE](LICENSE).
 VitaShelf Launcher se distribuye bajo la GNU General Public License v3.0 — véase [LICENSE](LICENSE).
 
-Third-party asset notices are included under `assets/blueglass/` and `assets/psp/`.
+Third-party asset notices are included under `assets/blueglass/` and `assets/bin/psp/`.

@@ -28,12 +28,14 @@
 /* Progress callbacks are throttled so UI redraws do not slow the transfer down. */
 #define VP_TRANSFER_PROGRESS_INTERVAL_US (100 * 1000ULL)
 #define VP_ADRENALINE_EBOOT "ux0:/app/PSPEMUCFW/eboot.bin"
-#define VP_PSP_PLUGIN_SOURCE "app0:psp/vitashelflauncher_pspboot.prx"
+#define VP_PSP_PLUGIN_SOURCE "app0:psp/vitashelf.prx"
 #define VP_PSP_SE_ROOT "ux0:/pspemu/seplugins"
-#define VP_PSP_PLUGIN_TARGET "ux0:/pspemu/seplugins/vitashelflauncher_pspboot.prx"
-#define VP_PSP_PLUGIN_PSP_PATH "ms0:/seplugins/vitashelflauncher_pspboot.prx"
-#define VP_PSP_PLUGIN_LINE_CLASSIC "ms0:/seplugins/vitashelflauncher_pspboot.prx 1"
-#define VP_PSP_PLUGIN_LINE_EPI "xmb, ms0:/seplugins/vitashelflauncher_pspboot.prx, on"
+#define VP_PSP_PLUGIN_TARGET "ux0:/pspemu/seplugins/vitashelf.prx"
+#define VP_PSP_PLUGIN_PSP_PATH "ms0:/seplugins/vitashelf.prx"
+#define VP_PSP_PLUGIN_LINE_CLASSIC "ms0:/seplugins/vitashelf.prx 1"
+#define VP_PSP_PLUGIN_LINE_EPI "xmb, ms0:/seplugins/vitashelf.prx, on"
+#define VP_PSP_PLUGIN_LEGACY_NAME "vitashelflauncher_pspboot.prx"
+#define VP_PSP_PLUGIN_LEGACY_TARGET "ux0:/pspemu/seplugins/vitashelflauncher_pspboot.prx"
 #define VP_PSP_VSH_PLUGINS "ux0:/pspemu/seplugins/vsh.txt"
 #define VP_PSP_EPI_PLUGINS "ux0:/pspemu/seplugins/EPIplugins.txt"
 #define VP_PSP_SE_PLUGINS "ux0:/pspemu/seplugins/plugins.txt"
@@ -603,7 +605,8 @@ static bool line_mentions_plugin(const char *line, size_t length) {
     size_t copy = length < sizeof(buffer) - 1 ? length : sizeof(buffer) - 1;
     (void)memcpy(buffer, line, copy);
     buffer[copy] = '\0';
-    return strstr(buffer, "vitashelflauncher_pspboot.prx") != NULL;
+    return strstr(buffer, "vitashelf.prx") != NULL ||
+           strstr(buffer, VP_PSP_PLUGIN_LEGACY_NAME) != NULL;
 }
 
 static bool line_enables_plugin(const char *line, size_t length) {
@@ -611,7 +614,7 @@ static bool line_enables_plugin(const char *line, size_t length) {
     size_t copy = length < sizeof(buffer) - 1 ? length : sizeof(buffer) - 1;
     (void)memcpy(buffer, line, copy);
     buffer[copy] = '\0';
-    if (strstr(buffer, "vitashelflauncher_pspboot.prx") == NULL) return false;
+    if (strstr(buffer, "vitashelf.prx") == NULL) return false;
     return strstr(buffer, " 1") != NULL || strstr(buffer, ", on") != NULL ||
            strstr(buffer, ", enabled") != NULL || strstr(buffer, ", true") != NULL;
 }
@@ -639,9 +642,11 @@ static bool write_plugin_enable_file(const char *path, VpPspPluginListFormat for
         const char *end = strchr(cursor, '\n');
         size_t length = end != NULL ? (size_t)(end - cursor) : strlen(cursor);
         if (line_mentions_plugin(cursor, length)) {
-            if (used + line_length + 1 >= NEXT_SIZE) goto cleanup;
-            used += (size_t)snprintf(next + used, NEXT_SIZE - used, "%s\n", enable_line);
-            found = true;
+            if (!found) {
+                if (used + line_length + 1 >= NEXT_SIZE) goto cleanup;
+                used += (size_t)snprintf(next + used, NEXT_SIZE - used, "%s\n", enable_line);
+                found = true;
+            }
         } else {
             if (used + length + 2 > NEXT_SIZE) goto cleanup;
             (void)memcpy(next + used, cursor, length);
@@ -733,6 +738,10 @@ bool vp_vita_psp_plugin_install(void) {
                                          &copy_code)) {
             return psp_plugin_copy_failed("copy", copy_code);
         }
+    }
+    if (path_exists(VP_PSP_PLUGIN_LEGACY_TARGET)) {
+        int legacy_code = sceIoRemove(VP_PSP_PLUGIN_LEGACY_TARGET);
+        record_psp_plugin_event("remove-legacy-target", legacy_code);
     }
     if (!write_plugin_enable_file(VP_PSP_VSH_PLUGINS, VP_PSP_LIST_CLASSIC)) {
         vp_vita_set_error("No se pudo habilitar el complemento PSP en vsh.txt");

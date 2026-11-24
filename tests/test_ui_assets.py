@@ -1,4 +1,5 @@
 """Validate the bundled Blueglass inventory and native PNG contracts."""
+import hashlib
 import json
 import re
 import struct
@@ -57,8 +58,13 @@ class ArtworkInventoryTests(unittest.TestCase):
             size={"ui_buttons":(128,128), "focus":(96,96), "console_focus":(96,96),
                   "console_surface":(136,170)}.get(name,(64,64))
             self.check_png(ASSETS / "ui" / f"{name}.png",size,512*1024)
-        self.assertEqual((ASSETS / "ui/ui_romm.png").read_bytes(),
-                         (ROOT / "assets/aurora/ui_icons/ui_romm.png").read_bytes())
+        artwork = json.loads((ASSETS / "provenance.json").read_text())
+        romm = next(entry for entry in artwork if entry["file"] == "ui/ui_romm.png")
+        self.assertEqual(romm["source"], "ui/ui_romm.png")
+        self.assertEqual(romm["upstream_git_blob"],
+                         "491e995d35661dbdc4f87cd2960f2ff87a336cf5")
+        self.assertEqual(hashlib.sha256((ASSETS / "ui/ui_romm.png").read_bytes()).hexdigest(),
+                         romm["sha256_source"])
         for weight,expected in (("Regular",400),("Medium",500),("SemiBold",600),("Bold",700)):
             data=(ASSETS / "fonts" / f"Inter-{weight}.ttf").read_bytes()
             self.assertEqual(data[:4],b"\x00\x01\x00\x00")
@@ -75,6 +81,11 @@ class ArtworkInventoryTests(unittest.TestCase):
         self.assertTrue((ASSETS / "NOTICE.md").is_file())
         self.assertTrue(json.loads((ASSETS / "provenance.json").read_text()))
         self.assertNotIn("?token=",(ASSETS / "provenance.json").read_text())
+
+    def test_retired_art_trees_are_absent(self):
+        self.assertFalse((ROOT / "assets/legacy").exists())
+        self.assertFalse((ROOT / "assets/aurora").exists())
+        self.assertNotIn("assets/aurora", (ROOT / "scripts/prepare-blueglass.py").read_text())
 
     def check_png(self,path,size,limit):
         data=path.read_bytes()

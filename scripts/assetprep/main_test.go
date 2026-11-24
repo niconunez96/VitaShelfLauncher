@@ -7,7 +7,6 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -65,71 +64,6 @@ func TestPrepare(t *testing.T) {
 				t.Fatal("foreground color/alpha lost")
 			}
 		})
-	}
-}
-
-func provenanceAssetPath(name string) string {
-	root := filepath.Join("..", "..", "assets")
-	candidates := []string{
-		filepath.Join(root, "legacy", name+".png"),
-		filepath.Join(root, "aurora", name+".png"),
-		filepath.Join(root, "aurora", "console_icons", name+".png"),
-		filepath.Join(root, "aurora", "ui_icons", name+".png"),
-	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return filepath.Join(root, "legacy", name+".png")
-}
-
-func TestBundledAssets(t *testing.T) {
-	manifestPath := filepath.Join("..", "..", "assets", "legacy", "provenance.tsv")
-	manifest, err := os.ReadFile(manifestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for _, line := range strings.Split(string(manifest), "\n") {
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		fields := strings.Split(line, "\t")
-		if len(fields) != 3 || seen[fields[0]] {
-			t.Fatalf("invalid provenance: %s", line)
-		}
-		seen[fields[0]] = true
-		data, err := os.ReadFile(provenanceAssetPath(fields[0]))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(data) < 29 || len(data) > 512*1024 || data[24] != 8 || (data[25] != 2 && data[25] != 6) || data[28] != 0 {
-			t.Fatalf("unsafe PNG %s", fields[0])
-		}
-		im, err := png.Decode(bytes.NewReader(data))
-		if err != nil {
-			t.Fatal(err)
-		}
-		w, h := 128, 128
-		if strings.HasPrefix(fields[0], "ui_") {
-			w, h = 64, 64
-		}
-		if fields[0] == "wallpaper" {
-			w, h = 480, 272
-		}
-		if im.Bounds().Dx() != w || im.Bounds().Dy() != h {
-			t.Fatalf("wrong size: %s", fields[0])
-		}
-		if fields[0] != "wallpaper" {
-			_, _, _, a := im.At(0, 0).RGBA()
-			if a != 0 {
-				t.Fatalf("background not keyed: %s", fields[0])
-			}
-		}
-	}
-	if len(seen) != 36 {
-		t.Fatalf("expected 36 assets, got %d", len(seen))
 	}
 }
 
