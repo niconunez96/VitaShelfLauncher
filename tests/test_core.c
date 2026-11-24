@@ -444,6 +444,73 @@ static void test_romm_metadata(void) {
     assert(strcmp(item->cover_url, "/assets/romm/resources/roms/7/7/cover/small.png") == 0);
 }
 
+static void test_romm_null_json_values(void) {
+    VpCatalog catalog;
+    VpItem *item;
+    const char *json = "{\"items\":["
+                       "{\"id\":8,\"name\":\"Null cover\",\"platform_slug\":\"nds\","
+                       "\"summary\":null,\"description\":\"Fallback summary\","
+                       "\"path_cover_small\":null,\"path_cover_large\":\"/assets/romm/8/big.png\","
+                       "\"download_url\":\"/api/roms/8/download\"},"
+                       "{\"id\":null,\"name\":\"Skipped\",\"platform_slug\":\"nds\"}]}";
+
+    vp_catalog_init(&catalog);
+    assert(vp_romm_import(&catalog, json));
+    assert(catalog.count == 1);
+    item = vp_catalog_find(&catalog, "romm:8");
+    assert(item != NULL);
+    assert(strcmp(item->description, "Fallback summary") == 0);
+    assert(strcmp(item->cover_url, "/assets/romm/8/big.png") == 0);
+}
+
+static void test_romm_quoted_null_strings_kept(void) {
+    VpCatalog catalog;
+    VpItem *item;
+
+    vp_catalog_init(&catalog);
+    assert(vp_romm_import(&catalog,
+        "{\"id\":\"null\",\"name\":\"Quoted id\",\"platform_slug\":\"nds\","
+        "\"path_cover_small\":\"/c.png\"}"));
+    assert(catalog.count == 1);
+    item = vp_catalog_find(&catalog, "romm:null");
+    assert(item != NULL);
+    assert(strcmp(item->title, "Quoted id") == 0);
+    assert(strcmp(item->cover_url, "/c.png") == 0);
+
+    vp_catalog_init(&catalog);
+    assert(vp_romm_import(&catalog,
+        "{\"id\":31,\"name\":\"null\",\"platform_slug\":\"nds\"}"));
+    assert(catalog.count == 1);
+    item = vp_catalog_find(&catalog, "romm:31");
+    assert(item != NULL);
+    assert(strcmp(item->title, "null") == 0);
+
+    vp_catalog_init(&catalog);
+    assert(vp_romm_import(&catalog,
+        "{\"id\":32,\"name\":\"S\",\"summary\":\"null\","
+        "\"description\":\"fallback\",\"path_cover_small\":\"null\","
+        "\"path_cover_large\":\"/big.png\"}"));
+    assert(catalog.count == 1);
+    item = vp_catalog_find(&catalog, "romm:32");
+    assert(item != NULL);
+    assert(strcmp(item->description, "null") == 0);
+    assert(strcmp(item->cover_url, "null") == 0);
+}
+
+static void test_romm_null_cover_chain_clears(void) {
+    VpCatalog catalog;
+    VpItem *item;
+
+    vp_catalog_init(&catalog);
+    assert(vp_romm_import(&catalog,
+        "{\"id\":33,\"name\":\"C\",\"path_cover_small\":null,"
+        "\"path_cover_large\":null,\"url_cover\":\"/uc.png\"}"));
+    assert(catalog.count == 1);
+    item = vp_catalog_find(&catalog, "romm:33");
+    assert(item != NULL);
+    assert(strcmp(item->cover_url, "/uc.png") == 0);
+}
+
 static void test_download_paths(void) {
     VpItem item;
     char extension[16];
@@ -1026,6 +1093,9 @@ int main(void) {
     test_library_navigation();
     test_library_filters();
     test_romm_metadata();
+    test_romm_null_json_values();
+    test_romm_quoted_null_strings_kept();
+    test_romm_null_cover_chain_clears();
     test_download_paths();
     test_psp_install_paths();
     test_launch_profiles();

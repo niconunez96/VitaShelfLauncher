@@ -83,6 +83,11 @@ static bool vp_json_value(const char *object, const char *object_end,
                !isspace((unsigned char)*value) && used + 1 < capacity) {
             destination[used++] = *value++;
         }
+        destination[used] = '\0';
+        if (strcmp(destination, "null") == 0) {
+            destination[0] = '\0';
+            return false;
+        }
     }
     destination[used] = '\0';
     return used > 0;
