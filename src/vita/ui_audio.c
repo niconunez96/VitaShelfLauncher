@@ -1,4 +1,5 @@
 #include <psp2/audioout.h>
+#include <psp2/kernel/threadmgr.h>
 
 #include <pthread.h>
 #include <stdbool.h>
@@ -12,6 +13,9 @@
 #define VP_UI_AUDIO_SAMPLE_RATE 48000
 #define VP_UI_AUDIO_BUFFER_SAMPLES 1024
 #define VP_UI_AUDIO_BUFFER_COUNT 4
+/* The longest shipped cue is 560 ms at 48 kHz (26880 frames). */
+#define VP_UI_AUDIO_MAX_CUE_FRAMES 27000
+#define VP_UI_AUDIO_QUEUED_FRAMES (VP_UI_AUDIO_BUFFER_SAMPLES * (VP_UI_AUDIO_BUFFER_COUNT - 1))
 
 typedef struct {
     const char *path;
@@ -38,10 +42,12 @@ static VpUiAudioPlayer player = {
  * size must be 64-byte aligned, otherwise the audio is corrupted on hardware.
  * A stack array has no such guarantee, and a static one also keeps them off the
  * small Vita thread stack. Each buffer is 1024 frames * 2 bytes = 2048 bytes.
- * The port only blocks until a buffer is accepted, so the player keeps a ring
- * of buffers ahead of the device and drains it before reusing the oldest one.
- * Only the audio thread calls play_sound. */
+ * Cues are decoded once at init so the audio thread never waits on storage or
+ * libc stdio locks while a download is writing catalog data. Only the audio
+ * thread calls play_sound. */
 _Alignas(64) static int16_t samples[VP_UI_AUDIO_BUFFER_COUNT][VP_UI_AUDIO_BUFFER_SAMPLES];
+_Alignas(64) static int16_t cues[VP_UI_SOUND_COUNT][VP_UI_AUDIO_MAX_CUE_FRAMES];
+static size_t cue_frames[VP_UI_SOUND_COUNT];
 
 static const VpUiAudioAsset assets[] = {
     [VP_UI_SOUND_NAVIGATION] = {"app0:assets/audio/01-navegacion-alternativa.wav"},
@@ -89,30 +95,59 @@ static bool seek_pcm_data(FILE *file) {
     }
 }
 
-static void play_sound(int port, VpUiSound sound) {
+static void load_cue(VpUiSound sound) {
     FILE *file;
-    size_t index = 0;
-    if ((unsigned int)sound >= sizeof(assets) / sizeof(assets[0])) return;
+    size_t frames;
+    if ((unsigned int)sound >= VP_UI_SOUND_COUNT) return;
     file = fopen(assets[sound].path, "rb");
     if (file == NULL || !seek_pcm_data(file)) {
         if (file != NULL) fclose(file);
+        cue_frames[sound] = 0;
         return;
     }
-    for (;;) {
-        size_t count = fread(samples[index], sizeof(samples[index][0]), VP_UI_AUDIO_BUFFER_SAMPLES, file);
-        if (count == 0) break;
+    frames = fread(cues[sound], sizeof(cues[sound][0]), VP_UI_AUDIO_MAX_CUE_FRAMES, file);
+    cue_frames[sound] = frames;
+    if (frames < VP_UI_AUDIO_MAX_CUE_FRAMES)
+        memset(cues[sound] + frames, 0,
+               (VP_UI_AUDIO_MAX_CUE_FRAMES - frames) * sizeof(cues[sound][0]));
+    fclose(file);
+}
+
+/* sceAudioOutOutput only waits until a buffer is accepted, not until it has
+ * played. Wait until the oldest ring buffer is no longer queued before reusing
+ * it; a negative count means the firmware does not report queue depth, so the
+ * blocking output call is the only pacing available. */
+static bool wait_for_room(int port) {
+    while (sceAudioOutGetRestSample(port) > VP_UI_AUDIO_QUEUED_FRAMES)
+        sceKernelDelayThread(100);
+    return true;
+}
+
+static void wait_for_idle(int port) {
+    while (sceAudioOutGetRestSample(port) > 0) sceKernelDelayThread(100);
+}
+
+static void play_sound(int port, VpUiSound sound) {
+    const int16_t *pcm;
+    size_t remaining, index = 0;
+    if ((unsigned int)sound >= VP_UI_SOUND_COUNT || cue_frames[sound] == 0) return;
+    wait_for_idle(port);
+    pcm = cues[sound];
+    remaining = cue_frames[sound];
+    while (remaining > 0) {
+        size_t count = remaining < VP_UI_AUDIO_BUFFER_SAMPLES
+                       ? remaining : VP_UI_AUDIO_BUFFER_SAMPLES;
+        if (!wait_for_room(port)) return;
+        memcpy(samples[index], pcm, count * sizeof(samples[index][0]));
         if (count < VP_UI_AUDIO_BUFFER_SAMPLES)
             memset(samples[index] + count, 0,
                    (VP_UI_AUDIO_BUFFER_SAMPLES - count) * sizeof(samples[index][0]));
-        if (sceAudioOutOutput(port, samples[index]) < 0) break;
+        if (sceAudioOutOutput(port, samples[index]) < 0) return;
+        pcm += count;
+        remaining -= count;
         index = (index + 1) % VP_UI_AUDIO_BUFFER_COUNT;
-        /* Drain only when the ring wraps. That wait overlaps with playback, and
-         * the following fread happens while the device is still consuming the
-         * other queued buffers instead of after a silent port. */
-        if (index == 0 && sceAudioOutOutput(port, NULL) < 0) break;
     }
-    if (index != 0) (void)sceAudioOutOutput(port, NULL);
-    fclose(file);
+    wait_for_idle(port);
 }
 
 static void *audio_thread(void *context) {
@@ -147,11 +182,13 @@ static void *audio_thread(void *context) {
 
 bool vp_ui_audio_init(void) {
     int result;
+    unsigned int sound;
     pthread_mutex_lock(&player.mutex);
     if (player.running) {
         pthread_mutex_unlock(&player.mutex);
         return true;
     }
+    for (sound = 0; sound < VP_UI_SOUND_COUNT; sound++) load_cue((VpUiSound)sound);
     player.pending = false;
     player.running = true;
     result = pthread_create(&player.thread, NULL, audio_thread, &player);

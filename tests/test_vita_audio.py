@@ -10,6 +10,14 @@ import wave
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+AUDIO = (ROOT / "src" / "vita" / "ui_audio.c").read_text()
+
+
+def function_body(signature):
+    start = AUDIO.index(signature)
+    return AUDIO[start : AUDIO.index("\n}", start) + 2]
+
+
 SOUNDS = {
     "navigation": "01-navegacion-alternativa.wav",
     "tab": "02-cambio-tab.wav",
@@ -98,22 +106,51 @@ class VitaAudioTests(unittest.TestCase):
         self.assertRegex(audio, r"int\s+volumes\[2\]\s*=\s*\{\s*volume\s*,\s*volume\s*\}")
         self.assertIn("SCE_AUDIO_VOLUME_FLAG_L_CH | SCE_AUDIO_VOLUME_FLAG_R_CH", audio)
 
-    def test_output_buffers_rotate_and_drain_only_on_wrap(self):
-        audio = (ROOT / "src" / "vita" / "ui_audio.c").read_text()
-        self.assertIn("#define VP_UI_AUDIO_BUFFER_COUNT 4", audio)
-        read = "fread(samples[index]"
+    def test_cues_are_loaded_once_and_playback_never_reads_files(self):
+        header = (ROOT / "src" / "vita" / "ui_audio.h").read_text()
+        self.assertIn("#define VP_UI_SOUND_COUNT 6", header)
+        init = function_body("bool vp_ui_audio_init(")
+        loader = function_body("static void load_cue(")
+        play = function_body("static void play_sound(")
+        self.assertIn("load_cue(", init)
+        self.assertIn("fopen(", loader)
+        self.assertIn("fread(", loader)
+        self.assertNotIn("fopen(", play)
+        self.assertNotIn("fread(", play)
+        self.assertNotIn("seek_pcm_data(", play)
+
+    def test_ring_pacing_keeps_the_port_fed_without_a_null_drain(self):
+        play = function_body("static void play_sound(")
+        room = function_body("static bool wait_for_room(")
+        idle = function_body("static void wait_for_idle(")
+        self.assertIn("sceAudioOutGetRestSample(port)", room)
+        self.assertIn("sceKernelDelayThread(100)", room)
+        self.assertIn("sceAudioOutGetRestSample(port)", idle)
+        self.assertIn("wait_for_idle(port);", play)
         sent = "sceAudioOutOutput(port, samples[index])"
-        advance = "index = (index + 1) % VP_UI_AUDIO_BUFFER_COUNT"
-        drained = "if (index == 0 && sceAudioOutOutput(port, NULL) < 0)"
-        self.assertIn(read, audio)
-        self.assertIn(sent, audio)
-        self.assertIn(advance, audio)
-        self.assertIn(drained, audio)
-        self.assertLess(audio.index(read), audio.index(sent))
-        self.assertLess(audio.index(sent), audio.index(advance))
-        self.assertLess(audio.index(advance), audio.index(drained))
-        self.assertNotIn("sceAudioOutOutput(port, samples)", audio)
-        self.assertEqual(audio.count("sceAudioOutOutput(port, NULL)"), 2)
+        self.assertIn(sent, play)
+        self.assertLess(play.index("wait_for_room(port)"), play.index(sent))
+        self.assertLess(play.index("memcpy(samples[index]"), play.index(sent))
+        self.assertIn("index = (index + 1) % VP_UI_AUDIO_BUFFER_COUNT", play)
+        self.assertNotIn("sceAudioOutOutput(port, NULL)", play)
+
+    def test_cue_storage_is_aligned_and_covers_the_longest_shipped_cue(self):
+        self.assertRegex(
+            AUDIO,
+            r"_Alignas\(64\)\s+static\s+int16_t\s+samples\s*\[VP_UI_AUDIO_BUFFER_COUNT\]"
+            r"\[VP_UI_AUDIO_BUFFER_SAMPLES\]",
+        )
+        self.assertRegex(
+            AUDIO,
+            r"_Alignas\(64\)\s+static\s+int16_t\s+cues\s*\[VP_UI_SOUND_COUNT\]"
+            r"\[VP_UI_AUDIO_MAX_CUE_FRAMES\]",
+        )
+        maximum = int(re.search(r"#define VP_UI_AUDIO_MAX_CUE_FRAMES (\d+)", AUDIO).group(1))
+        longest = max(
+            wave.open(str(ROOT / "assets/audio" / filename), "rb").getnframes()
+            for filename in SOUNDS.values()
+        )
+        self.assertGreaterEqual(maximum, longest)
 
 
 if __name__ == "__main__":

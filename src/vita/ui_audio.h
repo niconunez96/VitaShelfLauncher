@@ -12,6 +12,8 @@ typedef enum {
     VP_UI_SOUND_DOWNLOAD_COMPLETE
 } VpUiSound;
 
+#define VP_UI_SOUND_COUNT 6
+
 bool vp_ui_audio_init(void);
 void vp_ui_audio_play(VpUiSound sound);
 void vp_ui_audio_shutdown(void);
