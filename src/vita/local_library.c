@@ -23,6 +23,22 @@ static bool read_title(const char *path, VpItem *item) {
     return valid;
 }
 
+static void set_icon_path(VpItem *item, const char *path) {
+    size_t length=strlen(path);
+    if (length<sizeof(item->fs_name)) memcpy(item->fs_name,path,length+1);
+    else item->fs_name[0]=0;
+}
+
+static bool icon_header_valid(const char *path) {
+    unsigned char header[29];
+    size_t count;
+    FILE *icon=fopen(path,"rb");
+    if (!icon) return false;
+    count=fread(header,1,sizeof(header),icon);
+    fclose(icon);
+    return vp_safe_vita_icon_png(header,count);
+}
+
 bool vp_local_scan(VpCatalog *catalog, const char *apps, const char *appmeta, size_t *omitted) {
     DIR *dir;
     struct dirent *entry;
@@ -48,14 +64,24 @@ bool vp_local_scan(VpCatalog *catalog, const char *apps, const char *appmeta, si
                 !read_title(path,&item)) continue;
         }
         if (strcmp(item.launch_target,entry->d_name)) continue;
-        if (snprintf(item.fs_name,sizeof(item.fs_name),"%s/%s/sce_sys/icon0.png",apps,entry->d_name)>=(int)sizeof(item.fs_name)) continue;
         {
-            FILE *icon=fopen(item.fs_name,"rb");
-            if (icon) fclose(icon);
-            else if (snprintf(item.fs_name,sizeof(item.fs_name),"%s/%.9s/icon0.png",appmeta,entry->d_name)>=(int)sizeof(item.fs_name)) continue;
+            char app_icon[VP_PATH], meta_icon[VP_PATH];
+            if (snprintf(app_icon,sizeof(app_icon),"%s/%s/sce_sys/icon0.png",apps,entry->d_name)>=(int)sizeof(app_icon) ||
+                snprintf(meta_icon,sizeof(meta_icon),"%s/%.9s/icon0.png",appmeta,entry->d_name)>=(int)sizeof(meta_icon)) continue;
+            /* Installed game icons are often encrypted; appmeta holds the decoded copy. */
+            if (icon_header_valid(meta_icon)) set_icon_path(&item,meta_icon);
+            else if (icon_header_valid(app_icon)) set_icon_path(&item,app_icon);
+            else item.fs_name[0]=0; /* Keep the title, but do not promise an undecodable icon. */
         }
         if (!vp_catalog_add(catalog,&item)) (*omitted)++;
     }
+}
+
+bool vp_local_icon_path(const VpItem *item, char *path, size_t capacity) {
+    if (!item || !path || !capacity || item->source!=VP_SOURCE_LOCAL ||
+        strcmp(item->platform,"psvita") || !vp_vita_title_id_valid(item->launch_target) ||
+        !item->fs_name[0]) return false;
+    return snprintf(path,capacity,"%s",item->fs_name)<(int)capacity;
 }
 
 static bool artwork_path(const VpItem *item, const char *cache, char *path, size_t capacity) {
@@ -95,4 +121,14 @@ bool vp_local_artwork_save(const VpItem *item, const char *cache) {
     }
     if (!valid) (void)remove(temp);
     return valid;
+}
+
+bool vp_local_artwork_clear(VpItem *item, const char *cache) {
+    char path[VP_PATH];
+    if (!item || !artwork_path(item,cache,path,sizeof(path))) return false;
+    item->remote_id[0]=0;
+    item->cover_url[0]=0;
+    errno=0;
+    (void)remove(path);
+    return errno==0 || errno==ENOENT;
 }

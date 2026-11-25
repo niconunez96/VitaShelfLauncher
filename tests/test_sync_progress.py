@@ -27,17 +27,19 @@ class SyncProgressTests(unittest.TestCase):
 #include <string.h>
 static VpRommConnection romm_connection={.revision=1};
 static unsigned long integration_revision=1;
+static void safe_id(const char *id,char *dest,size_t n);
 #define VP_ARTWORK_CACHE "cache"
 '''
         backends = r'''
-static int requests, rename_result;
+static int requests, rename_result, removals, cleared;
 static bool transform_ok=true, background_ok=true, save_ok=true, cached;
 static VpConnectionState connection=VP_CONNECTION_CONNECTED;
 static VpArtworkResult lookup=VP_ARTWORK_FOUND;
+static void safe_id(const char *id,char *dest,size_t n) {snprintf(dest,n,"%s",id);}
 static void cover_path_for(const char *id,char *out,size_t n) {snprintf(out,n,"%s.png",id);}
 static void artwork_path_for(const char *id,char *out,size_t n) {cover_path_for(id,out,n);}
 static bool cached_cover_valid(const char *path) {(void)path;return cached;}
-static int sceIoRemove(const char *path) {(void)path;return 0;}
+static int sceIoRemove(const char *path) {(void)path;removals++;return 0;}
 static int sceIoRename(const char *a,const char *b) {(void)a;(void)b;return rename_result;}
 static bool vp_vita_transform_cover(const char *a,const char *b,const char *c,const char *d,void *e) {
     (void)a;(void)b;(void)c;(void)d;(void)e;return transform_ok;
@@ -57,6 +59,9 @@ VpArtworkResult vp_steamgrid_cover(VpItem *item,const char *key,VpRommProbeBacke
     (void)item;(void)key;(void)backend;(void)state;requests++;return lookup;
 }
 static bool vp_local_artwork_save(const VpItem *item,const char *path) {(void)item;(void)path;return save_ok;}
+static bool vp_local_artwork_clear(VpItem *item,const char *path) {
+    (void)path;cleared++;item->remote_id[0]=0;item->cover_url[0]=0;return true;
+}
 static void run(VpJobKind kind) {
     VpBackgroundJob *job=&background_job;
     const VpCatalog *catalog=&job->catalog;
@@ -74,13 +79,15 @@ finish:
 static void setup(VpSyncOperation operation) {
     VpBackgroundJob *job=&background_job;
     job->active=true; job->covers_completed=job->covers_missing=0;
+    removals=cleared=0;
     job->romm_revision=romm_connection.revision;job->integration_revision=integration_revision;
     job->catalog.count=2;
     for (size_t i=0;i<2;i++) {
         VpItem *item=&job->catalog.items[i];
         memset(item,0,sizeof(*item));
         item->source=operation==VP_SYNC_STEAMGRID?VP_SOURCE_LOCAL:VP_SOURCE_ROMM;
-        strcpy(item->id,"game");strcpy(item->platform,"psvita");strcpy(item->cover_url,"cover");
+        strcpy(item->id,"game");strcpy(item->platform,"psvita");
+        strcpy(item->cover_url,"cover");strcpy(item->remote_id,"123");
     }
     job->sync=(VpUiSyncStatus){.state=VP_SYNC_RUNNING,.operation=operation,.total=2};
     transform_ok=background_ok=save_ok=true;cached=false;rename_result=0;requests=0;
@@ -97,6 +104,9 @@ int main(void) {
     status=sync_status_snapshot(VP_INTEGRATION_STEAMGRID);
     assert(status.state==VP_SYNC_SUCCEEDED && status.processed==2 && status.missing==2 && status.ready==0);
     assert(strstr(status.detail,"SteamGridDB: carátulas — completado"));
+    assert(cleared==2 && removals==4);
+    assert(!background_job.catalog.items[0].cover_url[0] && !background_job.catalog.items[0].remote_id[0]);
+    assert(!background_job.catalog.items[1].cover_url[0] && !background_job.catalog.items[1].remote_id[0]);
     assert(sync_status_snapshot(VP_INTEGRATION_ROMM).state==VP_SYNC_IDLE);
     /* An unrelated subsequent job cannot erase the retained outcome. */
     background_job.sync=(VpUiSyncStatus){0};background_job.active=true;

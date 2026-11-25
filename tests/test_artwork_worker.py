@@ -63,6 +63,11 @@ int main(void) {
     publish(&app,VP_JOB_SYNC_STEAMGRID);
     assert(!strcmp(app.catalog.items[0].cover_url,"https://cdn.example/art.png"));
     assert(!strcmp(app.catalog.items[0].remote_id,"123"));
+    strcpy(background_job.catalog.items[0].cover_url,"");
+    strcpy(background_job.catalog.items[0].remote_id,"");
+    cover_cache_dirty=false;
+    publish(&app,VP_JOB_SYNC_STEAMGRID);
+    assert(!app.catalog.items[0].cover_url[0] && !app.catalog.items[0].remote_id[0] && cover_cache_dirty);
     publish(&app,VP_JOB_CHECK_IMAGES);
     assert(image_service_state==VP_CONNECTION_CONNECTED);
     puts("Artwork publication rejects stale configuration and changed title identities: PASS");

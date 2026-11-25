@@ -324,6 +324,7 @@ static bool cover_cache_dirty;
 static size_t catalog_omitted;
 
 static bool download_progress(unsigned long long downloaded, unsigned long long total, void *context);
+static void safe_id(const char *id, char *destination, size_t capacity);
 static void cover_path_for(const char *id, char *path, size_t capacity);
 static void artwork_path_for(const char *id, char *path, size_t capacity);
 static bool sync_cover_metadata(VpApp *app);
@@ -846,6 +847,15 @@ static void *background_job_run(void *context) {
                 break;
             }
             if (result==VP_ARTWORK_NOT_FOUND) {
+                char legacy[VP_PATH], safe[VP_TEXT];
+                /* A definitive no-match must not keep a stale SteamGrid cover:
+                 * fall back to the installed icon on the next cover pass. */
+                (void)vp_local_artwork_clear(cover,VP_ARTWORK_CACHE);
+                (void)sceIoRemove(path);
+                safe_id(cover->id,safe,sizeof(safe));
+                (void)snprintf(legacy,sizeof(legacy),
+                    "ux0:data/vitashelflauncher/cache/covers/processed-%s.png",safe);
+                (void)sceIoRemove(legacy);
                 job->covers_missing++;
                 sync_item_finished(job, false, true, false);
                 continue;
@@ -1742,19 +1752,46 @@ static void artwork_path_for(const char *id,char *path,size_t capacity) {
     (void)snprintf(path,capacity,"ux0:data/vitashelflauncher/cache/covers/art-v1-%s.png",safe);
 }
 
-static void record_cover_event(const char *event, const char *id, const char *path) {
+static void write_cover_event(const char *event, const char *id, const char *path, const char *detail) {
     const char *log_path = "ux0:data/vitashelflauncher/covers.log";
     SceIoStat info;
     FILE *log;
     /* Bound diagnostics and close each event so it survives a later decoder/GPU fault.
-     * Log cache IDs/paths only, never source URLs or bearer tokens. */
+     * Log cache IDs/paths and PNG headers only, never source URLs or bearer tokens. */
     bool rotate = sceIoGetstat(log_path, &info) >= 0 && info.st_size >= 64 * 1024;
     log = fopen(log_path, rotate ? "w" : "a");
     if (log == NULL) return;
-    (void)fprintf(log, "time_us=%llu event=%s id=%s path=%s\n",
-                  (unsigned long long)sceKernelGetProcessTimeWide(), event, id,
-                  path != NULL ? path : "-");
+    if (detail != NULL && *detail != '\0')
+        (void)fprintf(log, "time_us=%llu event=%s id=%s path=%s detail=%s\n",
+                      (unsigned long long)sceKernelGetProcessTimeWide(), event, id,
+                      path != NULL ? path : "-", detail);
+    else
+        (void)fprintf(log, "time_us=%llu event=%s id=%s path=%s\n",
+                      (unsigned long long)sceKernelGetProcessTimeWide(), event, id,
+                      path != NULL ? path : "-");
     fclose(log);
+}
+
+static void record_cover_event(const char *event, const char *id, const char *path) {
+    write_cover_event(event, id, path, NULL);
+}
+
+static void record_cover_event_header(const char *event, const char *id, const char *path,
+                                      const unsigned char *header, size_t size) {
+    char detail[72];
+    size_t used=0, i;
+    if (header == NULL) {
+        write_cover_event(event, id, path, NULL);
+        return;
+    }
+    used=(size_t)snprintf(detail,sizeof(detail),"bytes=%lu hex=",(unsigned long)size);
+    if (used>=sizeof(detail)) used=sizeof(detail)-1;
+    for (i=0;i<size && used+2<sizeof(detail);i++) {
+        int written=snprintf(detail+used,sizeof(detail)-used,"%02x",header[i]);
+        if (written<0 || (size_t)written>=sizeof(detail)-used) break;
+        used+=(size_t)written;
+    }
+    write_cover_event(event, id, path, detail);
 }
 
 static VpCoverSlot *find_cover_slot(const char *id) {
@@ -1831,7 +1868,7 @@ static vita2d_texture *load_texture_file(const char *id, const char *path) {
     if (!vp_safe_cover_png(header, read_count) &&
         !((!strncmp(path,"ux0:app/",8) || !strncmp(path,"ur0:appmeta/",12)) &&
           vp_safe_vita_icon_png(header,read_count))) {
-        record_cover_event("load-header-rejected", id, path);
+        record_cover_event_header("load-header-rejected", id, path, header, read_count);
         return NULL;
     }
     texture = vita2d_load_PNG_file(path);
@@ -1994,10 +2031,8 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
             (void)snprintf(path,sizeof(path),"ux0:data/vitashelflauncher/cache/covers/processed-%s.png",safe);
             cover_fd=sceIoOpen(path,SCE_O_RDONLY,0);
         }
-        if (cover_fd<0 && item->source==VP_SOURCE_LOCAL && item->fs_name[0]) {
-            (void)snprintf(path,sizeof(path),"%s",item->fs_name);
+        if (cover_fd<0 && vp_local_icon_path(item,path,sizeof(path)))
             cover_fd=sceIoOpen(path,SCE_O_RDONLY,0);
-        }
         if (cover_fd < 0) continue;
         sceIoClose(cover_fd);
         if (!cover_decode_request(item->id, path)) continue;
