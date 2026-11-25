@@ -62,14 +62,18 @@ bool vp_vita_title_launch_uri(const VpItem *item, char *uri, size_t capacity) {
 }
 
 bool vp_safe_vita_icon_png(const unsigned char *header, size_t size) {
-    unsigned char truecolor[29];
-    if (!header || size<sizeof(truecolor)) return false;
-    memcpy(truecolor,header,sizeof(truecolor));
-    /* Native icon0 files can be indexed PNGs; vita2d expands their palette. */
-    if (truecolor[25]==3) truecolor[25]=6;
-    return vp_safe_cover_png(truecolor,sizeof(truecolor)) &&
-        header[16]==0 && header[17]==0 && header[18]==0 && header[19]==128 &&
-        header[20]==0 && header[21]==0 && header[22]==0 && header[23]==128;
+    unsigned char expanded[29];
+    if (!header || size<sizeof(expanded)) return false;
+    memcpy(expanded,header,sizeof(expanded));
+    /* Local icon0 files can be indexed, grayscale, interlaced, or use a
+     * 16-bit depth; libpng/vita2d expands them to 8-bit RGB/RGBA on load. */
+    if (expanded[25]==0 || expanded[25]==3 || expanded[25]==4)
+        expanded[25]=(expanded[25]==0) ? 2 : 6;
+    if (expanded[25]==2 || expanded[25]==6) {
+        expanded[24]=8;
+        expanded[28]=0;
+    }
+    return vp_safe_cover_png(expanded,sizeof(expanded));
 }
 
 size_t vp_catalog_replace_source(VpCatalog *catalog, const VpCatalog *incoming, VpSource source) {

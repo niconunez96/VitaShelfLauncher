@@ -79,10 +79,15 @@ class VitaRenderLifecycleTests(unittest.TestCase):
         self.assertLess(decode, done)
         for event in ("load-open-failed", "load-size-rejected", "load-header-rejected"):
             self.assertIn(event, body)
-        log = function_body("static void record_cover_event(")
+        log = function_body("static void write_cover_event(")
         self.assertIn("fclose(log);", log)
         self.assertIn("64 * 1024", log)
         self.assertNotIn("cover_url", log)
+        header = function_body("static void record_cover_event_header(")
+        self.assertIn("hex=", header)
+        self.assertIn("bytes=%lu", header)
+        self.assertNotIn("%zu", header)
+        self.assertIn('record_cover_event_header("load-header-rejected"', body)
 
     def test_cover_decoding_runs_on_a_dedicated_worker(self):
         step = function_body("static void covers_step(")
@@ -96,6 +101,16 @@ class VitaRenderLifecycleTests(unittest.TestCase):
         main_body = function_body("int main(void)")
         self.assertIn("cover_decoder_init();", main_body)
         self.assertIn("cover_decoder_shutdown();", main_body)
+
+    def test_local_icon_is_an_explicit_cover_fallback(self):
+        step = function_body("static void covers_step(")
+        self.assertIn("vp_local_icon_path(item,path,sizeof(path))", step)
+        self.assertNotIn("item->fs_name", step)
+        loader = function_body("static vita2d_texture *load_texture_file(")
+        self.assertIn("vp_safe_vita_icon_png(header,read_count)", loader)
+        renderer = (ROOT / "src/vita/ui_renderer.c").read_text()
+        start = renderer.index("static void cover(")
+        self.assertIn("if (texture) fit(", renderer[start : renderer.index("\n}", start)])
 
     def test_manual_cover_sync_is_the_only_fetch_path(self):
         self.assertNotIn("VP_JOB_FETCH_COVER", SOURCE)

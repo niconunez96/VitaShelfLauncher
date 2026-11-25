@@ -48,6 +48,8 @@ int main(void) {
     item.remote_id[0]=0;
     f.search="{\"success\":true,\"data\":[{\"id\":123,\"name\":\"Persona 4 Golden\"},{\"id\":124,\"name\":\"Persona 4 Golden\"}]}";
     assert(vp_steamgrid_cover(&item,"fixture-key",backend,&state)==VP_ARTWORK_NOT_FOUND);
+    assert(!strcmp(item.cover_url,"https://cdn.example/cover.jpg")); /* Caller owns clearing. */
+    item.cover_url[0]=0;
     f.search="{\"success\":true,\"data\":[{\"id\":123,\"name\":\"Persona 4\"}]}";
     assert(vp_steamgrid_cover(&item,"fixture-key",backend,&state)==VP_ARTWORK_NOT_FOUND);
     f.search="{\"success\":true,\"data\":[{\"id\":123,\"name\":\"Persona 4 Golden\\u2122\"}]}";
