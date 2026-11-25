@@ -65,6 +65,15 @@ static int fake_pthread_create(pthread_t *thread,const pthread_attr_t *attrs,voi
 #define pthread_create fake_pthread_create
 '''
         worker = r'''
+static VpUiSyncStatus status_snapshot(int integration) {
+    VpJobStatusSnapshot snapshot = {0};
+    snapshot.active = background_job.active;
+    snapshot.kind = background_job.kind;
+    snapshot.sync = background_job.sync;
+    snapshot.romm_revision = background_job.romm_revision;
+    snapshot.integration_revision = background_job.integration_revision;
+    return sync_status_snapshot(&snapshot, integration);
+}
 static void *background_job_run(void *context) {
     /* Referenced but never run by the fake thread creator. */
     sync_progress(0,0,context);sync_item_finished(context,true,false,false);
@@ -82,7 +91,7 @@ int main(void) {
     assert(romm_pairing.active && !launches && !romm_check_pending);
     assert(!strcmp(background_job_active_label(),"búsqueda de juegos instalados"));
     assert(strstr(app.notice,"en cola") && strstr(app.notice,"juegos instalados"));
-    VpUiSyncStatus status=sync_status_snapshot(VP_INTEGRATION_ROMM);
+    VpUiSyncStatus status=status_snapshot( VP_INTEGRATION_ROMM);
     assert(status.state==VP_SYNC_RUNNING && status.stage==VP_SYNC_WAITING);
     assert(strstr(status.detail,"juegos instalados") && !strstr(status.detail,"NEW12345"));
     assert(!strstr(app.notice,"NEW12345"));
@@ -129,7 +138,7 @@ int main(void) {
     background_job.active=true;background_job.kind=VP_JOB_SYNC_COVERS;
     request_romm_pairing(&app);assert(romm_pairing.active);
     romm_connection.revision++;
-    assert(sync_status_snapshot(VP_INTEGRATION_ROMM).stage!=VP_SYNC_WAITING);
+    assert(status_snapshot( VP_INTEGRATION_ROMM).stage!=VP_SYNC_WAITING);
     assert(!start_pending_romm_pairing());
     assert(!romm_pairing.active && !romm_pairing.code[0] && launches==3);
 
@@ -137,7 +146,7 @@ int main(void) {
     request_romm_pairing(&app);
     assert(launches==4 && !background_job.active && !romm_pairing.active);
     assert(strstr(app.notice,"No se pudo iniciar el canje"));
-    assert(sync_status_snapshot(VP_INTEGRATION_ROMM).state==VP_SYNC_FAILED);
+    assert(status_snapshot( VP_INTEGRATION_ROMM).state==VP_SYNC_FAILED);
 
     /* A queued validation must not claim RomM is being checked before it owns the worker. */
     background_job.active=true;background_job.kind=VP_JOB_SCAN_LOCAL;

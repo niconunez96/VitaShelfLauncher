@@ -31,6 +31,15 @@ static void safe_id(const char *id,char *dest,size_t n);
 #define VP_ARTWORK_CACHE "cache"
 '''
         backends = r'''
+static VpUiSyncStatus status_snapshot(int integration) {
+    VpJobStatusSnapshot snapshot = {0};
+    snapshot.active = background_job.active;
+    snapshot.kind = background_job.kind;
+    snapshot.sync = background_job.sync;
+    snapshot.romm_revision = background_job.romm_revision;
+    snapshot.integration_revision = background_job.integration_revision;
+    return sync_status_snapshot(&snapshot, integration);
+}
 static int requests, rename_result, removals, cleared;
 static bool transform_ok=true, background_ok=true, save_ok=true, cached;
 static VpConnectionState connection=VP_CONNECTION_CONNECTED;
@@ -101,37 +110,37 @@ int main(void) {
     assert(!strcmp(background_job_active_label(),"sincronización de SteamGridDB"));
     setup(VP_SYNC_STEAMGRID); lookup=VP_ARTWORK_NOT_FOUND;
     run(VP_JOB_SYNC_STEAMGRID);
-    status=sync_status_snapshot(VP_INTEGRATION_STEAMGRID);
+    status=status_snapshot( VP_INTEGRATION_STEAMGRID);
     assert(status.state==VP_SYNC_SUCCEEDED && status.processed==2 && status.missing==2 && status.ready==0);
     assert(strstr(status.detail,"SteamGridDB: carátulas — completado"));
     assert(cleared==2 && removals==4);
     assert(!background_job.catalog.items[0].cover_url[0] && !background_job.catalog.items[0].remote_id[0]);
     assert(!background_job.catalog.items[1].cover_url[0] && !background_job.catalog.items[1].remote_id[0]);
-    assert(sync_status_snapshot(VP_INTEGRATION_ROMM).state==VP_SYNC_IDLE);
+    assert(status_snapshot( VP_INTEGRATION_ROMM).state==VP_SYNC_IDLE);
     /* An unrelated subsequent job cannot erase the retained outcome. */
     background_job.sync=(VpUiSyncStatus){0};background_job.active=true;
     sync_result_publish(&background_job);
-    assert(sync_status_snapshot(VP_INTEGRATION_STEAMGRID).missing==2);
+    assert(status_snapshot( VP_INTEGRATION_STEAMGRID).missing==2);
 
     setup(VP_SYNC_STEAMGRID); cached=true;
     run(VP_JOB_SYNC_STEAMGRID);
     assert(requests==0 && background_job.sync.processed==2 && background_job.sync.ready==2);
     setup(VP_SYNC_STEAMGRID); transform_ok=false;
     run(VP_JOB_SYNC_STEAMGRID);
-    status=sync_status_snapshot(VP_INTEGRATION_STEAMGRID);
+    status=status_snapshot( VP_INTEGRATION_STEAMGRID);
     assert(status.state==VP_SYNC_FAILED && status.processed==1 && status.failed==1);
     setup(VP_SYNC_STEAMGRID); save_ok=false;
     run(VP_JOB_SYNC_STEAMGRID);
-    assert(sync_status_snapshot(VP_INTEGRATION_STEAMGRID).state==VP_SYNC_FAILED && background_job.covers_completed==0);
+    assert(status_snapshot( VP_INTEGRATION_STEAMGRID).state==VP_SYNC_FAILED && background_job.covers_completed==0);
     setup(VP_SYNC_STEAMGRID); connection=VP_CONNECTION_INVALID_KEY;
     run(VP_JOB_SYNC_STEAMGRID);
-    status=sync_status_snapshot(VP_INTEGRATION_STEAMGRID);
+    status=status_snapshot( VP_INTEGRATION_STEAMGRID);
     assert(!requests && status.state==VP_SYNC_FAILED && strstr(status.detail,"API key"));
     assert(strstr(status.detail,"SteamGridDB: carátulas — fallido"));
 
     setup(VP_SYNC_METADATA);strcpy(background_job.catalog.items[0].background_url,"background");background_ok=false;
     run(VP_JOB_SYNC_COVERS);
-    status=sync_status_snapshot(VP_INTEGRATION_ROMM);
+    status=status_snapshot( VP_INTEGRATION_ROMM);
     assert(status.state==VP_SYNC_FAILED && status.processed==2 && status.ready==1 && status.failed==1);
     assert(strstr(status.detail,"RomM: metadata — fallido"));
     setup(VP_SYNC_METADATA);rename_result=-1;
@@ -139,22 +148,22 @@ int main(void) {
     assert(background_job.sync.ready==0 && background_job.sync.failed==2);
     setup(VP_SYNC_METADATA);background_job.catalog.count=0;background_job.sync.total=0;
     run(VP_JOB_SYNC_COVERS);
-    assert(sync_status_snapshot(VP_INTEGRATION_ROMM).state==VP_SYNC_SUCCEEDED);
+    assert(status_snapshot( VP_INTEGRATION_ROMM).state==VP_SYNC_SUCCEEDED);
 
     setup(VP_SYNC_CATALOG);sync_progress(1,4,&background_job);
-    assert(sync_status_snapshot(VP_INTEGRATION_ROMM).processed==1);
+    assert(status_snapshot( VP_INTEGRATION_ROMM).processed==1);
     background_job.succeeded=true;sync_result_publish(&background_job);background_job.active=false;
-    status=sync_status_snapshot(VP_INTEGRATION_ROMM);
+    status=status_snapshot( VP_INTEGRATION_ROMM);
     assert(status.state==VP_SYNC_SUCCEEDED && status.total==4);
     assert(strstr(status.detail,"RomM: catálogo — completado"));
     romm_connection.revision++;
-    assert(sync_status_snapshot(VP_INTEGRATION_ROMM).state==VP_SYNC_IDLE);
+    assert(status_snapshot( VP_INTEGRATION_ROMM).state==VP_SYNC_IDLE);
     sync_result_publish(&background_job);
-    assert(sync_status_snapshot(VP_INTEGRATION_ROMM).state==VP_SYNC_IDLE);
+    assert(status_snapshot( VP_INTEGRATION_ROMM).state==VP_SYNC_IDLE);
     setup(VP_SYNC_METADATA);integration_revision++;
-    assert(sync_status_snapshot(VP_INTEGRATION_ROMM).state==VP_SYNC_IDLE);
+    assert(status_snapshot( VP_INTEGRATION_ROMM).state==VP_SYNC_IDLE);
     run(VP_JOB_SYNC_COVERS);
-    assert(sync_status_snapshot(VP_INTEGRATION_ROMM).state==VP_SYNC_IDLE);
+    assert(status_snapshot( VP_INTEGRATION_ROMM).state==VP_SYNC_IDLE);
     puts("Sync counts, partial failures, retained results and revision guards: PASS");
 }
 '''

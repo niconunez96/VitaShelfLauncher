@@ -162,6 +162,15 @@ typedef struct {
     VpUiSyncStatus sync;
 } VpBackgroundJob;
 
+/* Small UI-thread copy: copying VpBackgroundJob would overflow the Vita stack. */
+typedef struct {
+    bool active;
+    VpJobKind kind;
+    unsigned long romm_revision;
+    unsigned long integration_revision;
+    VpUiSyncStatus sync;
+} VpJobStatusSnapshot;
+
 /* The core fetch buffer and backend diagnostics are deliberately single-owner. The background
  * worker keeps network work off the UI thread; cover PNG decoding has its own worker. */
 static VpBackgroundJob background_job = {
@@ -283,11 +292,12 @@ static void sync_result_publish(VpBackgroundJob *job) {
     sync_results[integration].integration_revision = job->integration_revision;
 }
 
-/* The caller holds the job mutex; only copy status for the current configuration. */
-static VpUiSyncStatus sync_status_snapshot(int integration) {
+/* Formatting happens on the UI thread from an immutable job snapshot, never
+ * while the worker holds the mutex. */
+static VpUiSyncStatus sync_status_snapshot(const VpJobStatusSnapshot *job, int integration) {
     VpUiSyncStatus status = {0};
     bool romm = integration == VP_INTEGRATION_ROMM;
-    int active_integration = background_job.sync.operation == VP_SYNC_STEAMGRID ?
+    int active_integration = job->sync.operation == VP_SYNC_STEAMGRID ?
         VP_INTEGRATION_STEAMGRID : VP_INTEGRATION_ROMM;
     if (integration != VP_INTEGRATION_ROMM && integration != VP_INTEGRATION_STEAMGRID) return status;
     if (romm && romm_pairing.active && romm_pairing.revision == romm_connection.revision) {
@@ -295,19 +305,19 @@ static VpUiSyncStatus sync_status_snapshot(int integration) {
         status.operation = VP_SYNC_CATALOG;
         status.stage = VP_SYNC_WAITING;
         (void)snprintf(status.detail, sizeof(status.detail), "En espera de: %s. El código se canjeará automáticamente.",
-            background_job_label(background_job.kind));
+            background_job_label(job->kind));
         return status;
     }
     if ((!romm || sync_results[integration].romm_revision == romm_connection.revision) &&
         (sync_results[integration].status.operation == VP_SYNC_CATALOG ||
          sync_results[integration].integration_revision == integration_revision))
         status = sync_results[integration].status;
-    if (background_job.active && background_job.sync.state == VP_SYNC_RUNNING &&
+    if (job->active && job->sync.state == VP_SYNC_RUNNING &&
         active_integration == integration &&
-        (!romm || background_job.romm_revision == romm_connection.revision) &&
-        (background_job.sync.operation == VP_SYNC_CATALOG ||
-         background_job.integration_revision == integration_revision))
-        status = background_job.sync;
+        (!romm || job->romm_revision == romm_connection.revision) &&
+        (job->sync.operation == VP_SYNC_CATALOG ||
+         job->integration_revision == integration_revision))
+        status = job->sync;
     return status;
 }
 static VpDownloadQueue download_queue;
@@ -322,6 +332,13 @@ static char cached_platform[VP_TEXT];
 static bool catalog_view_cache_dirty = true;
 static bool cover_cache_dirty;
 static size_t catalog_omitted;
+#define VP_COVER_PATH_CACHE 32
+typedef struct { char id[VP_TEXT]; char path[VP_PATH]; } VpCoverPathEntry;
+static VpCoverPathEntry cover_path_cache[VP_COVER_PATH_CACHE];
+static size_t cover_path_cache_used;
+static char cached_artwork_id[VP_TEXT];
+static char cached_artwork_path_value[VP_PATH];
+static size_t cover_count_cache;
 
 static bool download_progress(unsigned long long downloaded, unsigned long long total, void *context);
 static void safe_id(const char *id, char *destination, size_t capacity);
@@ -910,7 +927,8 @@ static void *background_job_run(void *context) {
         }
     }
 finish:
-    (void)snprintf(error, sizeof(error), "%s", succeeded ? "" : vp_vita_last_error());
+    if (succeeded) error[0] = '\0';
+    else vp_vita_last_error(error, sizeof(error));
 
     pthread_mutex_lock(&job->mutex);
     if (job->token_exchanged ||
@@ -1983,6 +2001,91 @@ static bool cover_decode_request(const char *id, const char *path) {
     return queued;
 }
 
+static void invalidate_cover_path(const char *id) {
+    size_t index;
+    if (!strncmp(id, "art:", 4)) {
+        cached_artwork_id[0] = '\0';
+        cached_artwork_path_value[0] = '\0';
+        return;
+    }
+    for (index = 0; index < cover_path_cache_used; index++) {
+        if (!strcmp(cover_path_cache[index].id, id)) {
+            cover_path_cache[index].id[0] = '\0';
+            cover_path_cache[index].path[0] = '\0';
+            return;
+        }
+    }
+}
+
+/* Existence probes use Vita I/O without opening a stdio stream. Cache both hits
+ * and misses until the cache is invalidated so scrolling does not re-probe the
+ * same files on every frame. */
+static bool cached_cover_path(const VpItem *item, char *path, size_t capacity) {
+    size_t index;
+    SceUID cover_fd;
+    VpCoverPathEntry *entry = NULL;
+    for (index = 0; index < cover_path_cache_used; index++) {
+        if (cover_path_cache[index].id[0] != '\0' &&
+            !strcmp(cover_path_cache[index].id, item->id)) {
+            entry = &cover_path_cache[index];
+            break;
+        }
+    }
+    if (entry != NULL) {
+        if (entry->path[0] == '\0') return false;
+        (void)snprintf(path, capacity, "%s", entry->path);
+        return true;
+    }
+    for (index = 0; index < cover_path_cache_used; index++) {
+        if (cover_path_cache[index].id[0] == '\0') {
+            entry = &cover_path_cache[index];
+            break;
+        }
+    }
+    if (entry == NULL && cover_path_cache_used < VP_COVER_PATH_CACHE)
+        entry = &cover_path_cache[cover_path_cache_used++];
+    if (entry != NULL) {
+        (void)snprintf(entry->id, sizeof(entry->id), "%s", item->id);
+        entry->path[0] = '\0';
+    }
+    cover_path_for(item->id, path, capacity);
+    cover_fd = sceIoOpen(path, SCE_O_RDONLY, 0);
+    if (cover_fd < 0) {
+        char safe[VP_TEXT];
+        safe_id(item->id, safe, sizeof(safe));
+        (void)snprintf(path, capacity, "ux0:data/vitashelflauncher/cache/covers/processed-%s.png", safe);
+        cover_fd = sceIoOpen(path, SCE_O_RDONLY, 0);
+    }
+    if (cover_fd < 0 && vp_local_icon_path(item, path, capacity))
+        cover_fd = sceIoOpen(path, SCE_O_RDONLY, 0);
+    if (cover_fd < 0) return false;
+    sceIoClose(cover_fd);
+    if (entry != NULL) (void)snprintf(entry->path, sizeof(entry->path), "%s", path);
+    return true;
+}
+
+static bool cached_artwork_path(const VpItem *item, char *id, char *path, size_t capacity) {
+    SceUID fd;
+    (void)snprintf(id, VP_TEXT, "art:%.180s", item->id);
+    if (!strcmp(cached_artwork_id, id)) {
+        if (cached_artwork_path_value[0] == '\0') return false;
+        (void)snprintf(path, capacity, "%s", cached_artwork_path_value);
+        return true;
+    }
+    artwork_path_for(item->id, cached_artwork_path_value, sizeof(cached_artwork_path_value));
+    fd = sceIoOpen(cached_artwork_path_value, SCE_O_RDONLY, 0);
+    if (fd >= 0) {
+        sceIoClose(fd);
+        (void)snprintf(cached_artwork_id, sizeof(cached_artwork_id), "%s", id);
+        (void)snprintf(path, capacity, "%s", cached_artwork_path_value);
+        return true;
+    }
+    (void)snprintf(cached_artwork_id, sizeof(cached_artwork_id), "%s", id);
+    cached_artwork_path_value[0] = '\0';
+    path[0] = '\0';
+    return false;
+}
+
 static void cover_decode_collect(void) {
     char id[VP_TEXT];
     char path[VP_PATH];
@@ -2007,7 +2110,10 @@ static void cover_decode_collect(void) {
         return;
     }
     if (texture != NULL) vita2d_free_texture(texture);
-    else if (!strncmp(path,VP_ARTWORK_CACHE "/",strlen(VP_ARTWORK_CACHE "/"))) (void)sceIoRemove(path);
+    else {
+        invalidate_cover_path(id);
+        if (!strncmp(path,VP_ARTWORK_CACHE "/",strlen(VP_ARTWORK_CACHE "/"))) (void)sceIoRemove(path);
+    }
 }
 
 static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
@@ -2018,23 +2124,9 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
         const VpItem *item = &app->catalog.items[indexes[index]];
         VpCoverSlot *slot;
         char path[VP_PATH];
-        SceUID cover_fd;
         if (item->cover_url[0] == '\0' && item->source!=VP_SOURCE_LOCAL) continue;
         if (find_cover_slot(item->id) != NULL) continue;
-        cover_path_for(item->id, path, sizeof(path));
-        /* Probe through Vita I/O without opening a stdio stream just to check
-         * for existence. Cached PNGs are decoded by the cover worker. */
-        cover_fd = sceIoOpen(path, SCE_O_RDONLY, 0);
-        if (cover_fd<0) {
-            char safe[VP_TEXT];
-            safe_id(item->id,safe,sizeof(safe));
-            (void)snprintf(path,sizeof(path),"ux0:data/vitashelflauncher/cache/covers/processed-%s.png",safe);
-            cover_fd=sceIoOpen(path,SCE_O_RDONLY,0);
-        }
-        if (cover_fd<0 && vp_local_icon_path(item,path,sizeof(path)))
-            cover_fd=sceIoOpen(path,SCE_O_RDONLY,0);
-        if (cover_fd < 0) continue;
-        sceIoClose(cover_fd);
+        if (!cached_cover_path(item, path, sizeof(path))) continue;
         if (!cover_decode_request(item->id, path)) continue;
         slot = acquire_slot(item->id, indexes, count);
         if (slot == NULL) return;
@@ -2046,17 +2138,11 @@ static void covers_step(VpApp *app, const size_t *indexes, size_t count) {
     if (app->library_level==VP_LEVEL_ROMS && app->active_view!=VP_VIEW_GRID && app->selected_item<app->catalog.count) {
         const VpItem *item=&app->catalog.items[app->selected_item];
         char id[VP_TEXT],path[VP_PATH];
-        (void)snprintf(id,sizeof(id),"art:%.180s",item->id);
-        if (item->background_url[0] && !find_cover_slot(id)) {
-            SceUID fd;
-            artwork_path_for(item->id,path,sizeof(path));
-            fd=sceIoOpen(path,SCE_O_RDONLY,0);
-            if (fd>=0) {
-                sceIoClose(fd);
-                if (cover_decode_request(id,path)) {
-                    VpCoverSlot *slot=acquire_slot(id,indexes,count);
-                    if (slot) slot->attempted=true;
-                }
+        if (item->background_url[0] && cached_artwork_path(item,id,path,sizeof(path)) &&
+            !find_cover_slot(id)) {
+            if (cover_decode_request(id,path)) {
+                VpCoverSlot *slot=acquire_slot(id,indexes,count);
+                if (slot) slot->attempted=true;
             }
         }
     }
@@ -2112,13 +2198,18 @@ static void activate_selected(VpApp *app) {
                 show_notification(app, "Presiona X otra vez para instalar el complemento PSP");
                 return;
             }
+            char error_text[VP_TEXT];
             const char *error = "No se pudo instalar el complemento PSP";
             if (vp_vita_psp_plugin_install()) {
                 (void)vp_vita_psp_runtime_status(NULL, &plugin_installed, &plugin_enabled);
                 if (plugin_installed && plugin_enabled) error = NULL;
-                else error = vp_vita_last_error();
+                else {
+                    vp_vita_last_error(error_text, sizeof(error_text));
+                    error = error_text;
+                }
             } else {
-                error = vp_vita_last_error();
+                vp_vita_last_error(error_text, sizeof(error_text));
+                error = error_text;
             }
             app->installation_armed = false;
             installation_armed_at = 0;
@@ -2130,7 +2221,9 @@ static void activate_selected(VpApp *app) {
             return;
         }
         if (!vp_vita_write_psp_boot_request(item->launch_target)) {
-            show_notification(app, "%.150s", vp_vita_last_error());
+            char error_text[VP_TEXT];
+            vp_vita_last_error(error_text, sizeof(error_text));
+            show_notification(app, "%.150s", error_text);
             return;
         }
         if (!vp_vita_launch_uri("psgm:play?titleid=PSPEMUCFW")) {
@@ -2228,26 +2321,16 @@ static void refresh_download_queue_progress(void) {
     }
 }
 
-/* Called only after the previous GPU frame completes, and before starting a scene.
- * Cache preparation may retire textures that the previous frame referenced. */
-static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
+/* CPU-only work runs before the GPU fence so it overlaps the previous frame. */
+static void prepare_shell_cpu(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
     size_t group_count = 0;
     size_t visible_count = 0;
-    size_t cover_count = 0;
-    const VpItem *selected = NULL;
-    vita2d_texture *background_texture = NULL;
+    size_t selected_position = 0;
+    VpJobStatusSnapshot job_snapshot = {0};
     size_t index;
 
     memset(frame, 0, sizeof(*frame));
     refresh_download_queue_progress();
-    if (cover_cache_dirty) {
-        for (index=0;index<VP_COVER_SLOTS;index++) {
-            if (cover_slots[index].texture) vita2d_free_texture(cover_slots[index].texture);
-            memset(&cover_slots[index],0,sizeof(cover_slots[index]));
-        }
-        cover_cache_dirty=false;
-    }
-
     if (app->active_screen == VP_SCREEN_LIBRARY) {
         refresh_catalog_view_cache(app);
         if (app->library_level == VP_LEVEL_PLATFORMS) {
@@ -2256,7 +2339,8 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
                 app->selected_platform = group_count - 1;
         } else {
             visible_count = visible_count_cache;
-            if (visible_count > 0) selected = &app->catalog.items[app->selected_item];
+            if (visible_count > 0) selected_position = visible_position(visible_indexes,
+                                                                         visible_count, app->selected_item);
         }
     }
 
@@ -2266,7 +2350,7 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
         app->active_view==VP_VIEW_LIST) {
         if (!frame->touch_scrolling) {
             if (list_selected!=app->selected_item)
-                list_start=vp_ui_list_start(visible_position(visible_indexes,visible_count,app->selected_item),visible_count,list_start);
+                list_start=vp_ui_list_start(selected_position,visible_count,list_start);
             else list_start=(size_t)vp_ui_scroll_clamp((float)list_start,visible_count,VP_UI_LIST_PAGE);
         }
         list_selected=app->selected_item;
@@ -2276,49 +2360,38 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
         app->active_view==VP_VIEW_GRID) {
         if (!frame->touch_scrolling) {
             if (grid_selected!=app->selected_item)
-                grid_start=vp_ui_grid_start(visible_position(visible_indexes,visible_count,app->selected_item),visible_count,grid_start);
+                grid_start=vp_ui_grid_start(selected_position,visible_count,grid_start);
             else grid_start=(size_t)vp_ui_scroll_clamp((float)grid_start,vp_ui_grid_rows(visible_count),VP_UI_GRID_ROWS);
         }
         grid_selected=app->selected_item;
         frame->grid_scroll=frame->touch_scrolling?touch_gesture.position:(float)grid_start;
     } else { grid_start=0; grid_selected=VP_MAX_ITEMS; }
     if (visible_count && app->active_view==VP_VIEW_CAROUSEL)
-        frame->carousel_base=frame->touch_scrolling?(int)lroundf(touch_gesture.position):
-            (int)visible_position(visible_indexes,visible_count,app->selected_item);
+        frame->carousel_base=frame->touch_scrolling?(int)lroundf(touch_gesture.position):(int)selected_position;
 
-    if (app->active_screen == VP_SCREEN_LIBRARY) {
-        if (app->library_level == VP_LEVEL_ROMS) {
-            size_t page_size = vp_ui_page_size(app->active_view);
-            size_t position;
-            size_t start;
-            position = visible_position(visible_indexes, visible_count, app->selected_item);
-            start = (position / page_size) * page_size;
-            if (app->active_view==VP_VIEW_LIST) {
-                start=(size_t)floorf(frame->list_scroll);
-                page_size=VP_UI_LIST_PAGE+1;
-            } else if (app->active_view==VP_VIEW_GRID) {
-                start=(size_t)floorf(frame->grid_scroll)*VP_UI_GRID_COLUMNS;
-                page_size=VP_UI_GRID_WINDOW;
-            }
-            if (visible_count && app->active_view == VP_VIEW_CAROUSEL) {
-                position=vp_ui_wrap_index(frame->carousel_base,visible_count);
-                cover_indexes[cover_count++] = visible_indexes[position];
-                for (int distance=1;distance<=VP_UI_CAROUSEL_REACH;distance++) {
-                    cover_indexes[cover_count++] = visible_indexes[(position+visible_count-(size_t)distance%visible_count)%visible_count];
-                    cover_indexes[cover_count++] = visible_indexes[(position+(size_t)distance)%visible_count];
-                }
-            } else {
-                if (visible_count) cover_indexes[cover_count++] = visible_indexes[position];
-                for (index = start; index < visible_count && index < start + page_size; index++)
-                    if (index != position)
-                        cover_indexes[cover_count++] = visible_indexes[index];
-            }
+    cover_count_cache = 0;
+    if (app->active_screen == VP_SCREEN_LIBRARY && app->library_level == VP_LEVEL_ROMS) {
+        size_t page_size = vp_ui_page_size(app->active_view);
+        size_t start = (selected_position / page_size) * page_size;
+        if (app->active_view==VP_VIEW_LIST) {
+            start=(size_t)floorf(frame->list_scroll);
+            page_size=VP_UI_LIST_PAGE+1;
+        } else if (app->active_view==VP_VIEW_GRID) {
+            start=(size_t)floorf(frame->grid_scroll)*VP_UI_GRID_COLUMNS;
+            page_size=VP_UI_GRID_WINDOW;
         }
-        covers_step(app, cover_indexes, cover_count);
-        if (selected != NULL) {
-            char artwork_id[VP_TEXT];
-            (void)snprintf(artwork_id,sizeof(artwork_id),"art:%.180s",selected->id);
-            background_texture = cover_texture_for(artwork_id);
+        if (visible_count && app->active_view == VP_VIEW_CAROUSEL) {
+            size_t position=vp_ui_wrap_index(frame->carousel_base,visible_count);
+            cover_indexes[cover_count_cache++] = visible_indexes[position];
+            for (int distance=1;distance<=VP_UI_CAROUSEL_REACH;distance++) {
+                cover_indexes[cover_count_cache++] = visible_indexes[(position+visible_count-(size_t)distance%visible_count)%visible_count];
+                cover_indexes[cover_count_cache++] = visible_indexes[(position+(size_t)distance)%visible_count];
+            }
+        } else {
+            if (visible_count) cover_indexes[cover_count_cache++] = visible_indexes[selected_position];
+            for (index = start; index < visible_count && index < start + page_size; index++)
+                if (index != selected_position)
+                    cover_indexes[cover_count_cache++] = visible_indexes[index];
         }
     }
 
@@ -2327,29 +2400,7 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
     frame->app = app; frame->font = font;
     frame->groups = platform_groups; frame->group_count = group_count;
     frame->visible = visible_indexes; frame->visible_count = visible_count;
-    frame->background = background_texture;
-    if (visible_count) {
-        size_t position = visible_position(visible_indexes, visible_count, app->selected_item);
-        size_t page = vp_ui_page_size(app->active_view);
-        size_t start = (position / page) * page;
-        frame->selected_cover=cover_texture_for(app->catalog.items[app->selected_item].id);
-        if (app->active_view == VP_VIEW_CAROUSEL) {
-            for (int offset=-VP_UI_CAROUSEL_REACH;offset<=VP_UI_CAROUSEL_REACH;offset++) {
-                size_t slot=vp_ui_wrap_index(frame->carousel_base+offset,visible_count);
-                frame->covers[offset+VP_UI_CAROUSEL_REACH] = cover_texture_for(app->catalog.items[visible_indexes[slot]].id);
-            }
-        } else {
-            if (app->active_view==VP_VIEW_LIST) {
-                start=(size_t)floorf(frame->list_scroll);
-                page=VP_UI_LIST_PAGE+1;
-            } else if (app->active_view==VP_VIEW_GRID) {
-                start=(size_t)floorf(frame->grid_scroll)*VP_UI_GRID_COLUMNS;
-                page=VP_UI_GRID_WINDOW;
-            }
-            for (index = start; index < visible_count && index < start + page; index++)
-                frame->covers[index - start] = cover_texture_for(app->catalog.items[visible_indexes[index]].id);
-        }
-    }
+    frame->selected_position = selected_position;
     frame->downloads = &download_queue; frame->download_selection = download_selection;
     frame->library_modal = library_modal; frame->library_modal_row = library_modal_row;
     frame->library_modal_rows = library_modal_rows();
@@ -2402,9 +2453,61 @@ static void prepare_shell(VpUiFrame *frame, VpUiFonts *font, VpApp *app) {
         frame->storage_free=free_space; frame->storage_total=total_space;
     }
     pthread_mutex_lock(&background_job.mutex);
-    frame->busy = background_job.active;
-    frame->sync = sync_status_snapshot(settings_integration);
+    job_snapshot.active = background_job.active;
+    job_snapshot.kind = background_job.kind;
+    job_snapshot.sync = background_job.sync;
+    job_snapshot.romm_revision = background_job.romm_revision;
+    job_snapshot.integration_revision = background_job.integration_revision;
     pthread_mutex_unlock(&background_job.mutex);
+    frame->busy = job_snapshot.active;
+    frame->sync = sync_status_snapshot(&job_snapshot, settings_integration);
+}
+
+/* GPU work may retire textures from the previous frame, so it runs only after
+ * vita2d_wait_rendering_done(). */
+static void prepare_shell_gpu(VpUiFrame *frame, VpApp *app) {
+    size_t index;
+    vita2d_texture *background_texture = NULL;
+    if (cover_cache_dirty) {
+        for (index=0;index<VP_COVER_SLOTS;index++) {
+            if (cover_slots[index].texture) vita2d_free_texture(cover_slots[index].texture);
+            memset(&cover_slots[index],0,sizeof(cover_slots[index]));
+        }
+        cover_path_cache_used=0;
+        cached_artwork_id[0]='\0';
+        cached_artwork_path_value[0]='\0';
+        cover_cache_dirty=false;
+    }
+    covers_step(app, cover_indexes, cover_count_cache);
+    if (frame->app->active_screen == VP_SCREEN_LIBRARY && frame->app->library_level == VP_LEVEL_ROMS &&
+        frame->visible_count && app->selected_item < app->catalog.count) {
+        char artwork_id[VP_TEXT];
+        (void)snprintf(artwork_id,sizeof(artwork_id),"art:%.180s",app->catalog.items[app->selected_item].id);
+        background_texture = cover_texture_for(artwork_id);
+    }
+    frame->background = background_texture;
+    if (frame->visible_count) {
+        size_t position = frame->selected_position;
+        size_t page = vp_ui_page_size(app->active_view);
+        size_t start = (position / page) * page;
+        frame->selected_cover=cover_texture_for(app->catalog.items[app->selected_item].id);
+        if (app->active_view == VP_VIEW_CAROUSEL) {
+            for (int offset=-VP_UI_CAROUSEL_REACH;offset<=VP_UI_CAROUSEL_REACH;offset++) {
+                size_t slot=vp_ui_wrap_index(frame->carousel_base+offset,frame->visible_count);
+                frame->covers[offset+VP_UI_CAROUSEL_REACH] = cover_texture_for(app->catalog.items[visible_indexes[slot]].id);
+            }
+        } else {
+            if (app->active_view==VP_VIEW_LIST) {
+                start=(size_t)floorf(frame->list_scroll);
+                page=VP_UI_LIST_PAGE+1;
+            } else if (app->active_view==VP_VIEW_GRID) {
+                start=(size_t)floorf(frame->grid_scroll)*VP_UI_GRID_COLUMNS;
+                page=VP_UI_GRID_WINDOW;
+            }
+            for (index = start; index < frame->visible_count && index < start + page; index++)
+                frame->covers[index - start] = cover_texture_for(app->catalog.items[visible_indexes[index]].id);
+        }
+    }
     vp_ui_prepare(frame);
 }
 
@@ -2998,12 +3101,14 @@ int main(void) {
                 }
             }
         }
-        /* swap_buffers queues presentation; it is not a fence for texture retirement
-         * or the temporary vertex pool that start_drawing resets. Skip the fence on
+        /* CPU-only preparation overlaps the previous GPU frame. swap_buffers
+         * queues presentation; it is not a fence for texture retirement or the
+         * temporary vertex pool that start_drawing resets. Skip the fence on
          * the first frame: no rendering is in flight yet, and calling it there
          * crashes Vita3K before the first draw. */
+        prepare_shell_cpu(&frame, font, &app);
         if (rendered_once) vita2d_wait_rendering_done();
-        prepare_shell(&frame, font, &app);
+        prepare_shell_gpu(&frame, &app);
         vita2d_start_drawing();
         vita2d_clear_screen();
         vp_ui_render(&frame);

@@ -61,6 +61,18 @@ static unsigned int color(const char *s,unsigned int fallback) {
     return sscanf(s,"#%02x%02x%02x",&r,&g,&b)==3?C(r,g,b,255):fallback;
 }
 
+/* Theme strings change only in Settings; reparse them on change, not per frame. */
+#define VP_THEME_CACHE_SLOTS 5
+static char theme_cache_keys[VP_THEME_CACHE_SLOTS][16];
+static unsigned int theme_cache_colors[VP_THEME_CACHE_SLOTS];
+static unsigned int cached_color(const char *s,unsigned int fallback,size_t slot) {
+    if (s==NULL || strcmp(theme_cache_keys[slot],s)!=0) {
+        theme_cache_colors[slot]=s==NULL?fallback:color(s,fallback);
+        (void)snprintf(theme_cache_keys[slot],sizeof(theme_cache_keys[slot]),"%s",s==NULL?"":s);
+    }
+    return theme_cache_colors[slot];
+}
+
 static void resolve_text_colors(const VpUiFrame *f) {
     switch (f->preferences.text_color) {
         case VP_UI_TEXT_COLOR_LIGHT:
@@ -209,12 +221,6 @@ static void console_card(VpUiRect r,bool selected,float lift) {
     }
 }
 
-static size_t position(const VpUiFrame *f) {
-    size_t i;
-    for (i=0;i<f->visible_count;i++) if (f->visible[i]==f->app->selected_item) return i;
-    return 0;
-}
-
 static const char *platform_asset(const VpUiFrame *f) {
     if (f->app->active_screen!=VP_SCREEN_LIBRARY) return NULL;
     if (f->app->library_level==VP_LEVEL_PLATFORMS)
@@ -259,7 +265,7 @@ void vp_ui_prepare(const VpUiFrame *f) {
     if (carousel) {
         if (carousel_touch_scrolling && !f->touch_scrolling)
             vp_ui_carousel_motion_rebase(&carousel_motion);
-        vp_ui_carousel_motion_update(&carousel_motion,position(f),f->visible_count,
+        vp_ui_carousel_motion_update(&carousel_motion,f->selected_position,f->visible_count,
             now,appearance.motion_ms);
         if (f->touch_scrolling)
             vp_ui_carousel_motion_drag(&carousel_motion,f->touch_scroll,now);
@@ -313,7 +319,7 @@ static void heading(const VpUiFrame *f) {
     if (f->app->active_screen!=VP_SCREEN_LIBRARY) return;
     if (f->app->library_level==VP_LEVEL_ROMS) {
         if (!strcmp(f->app->active_platform,VP_FAVORITES_PLATFORM)) title=VP_FAVORITES_DISPLAY;
-        else title=f->visible_count?f->app->catalog.items[f->visible[position(f)]].platform_display:f->app->active_platform;
+        else title=f->visible_count?f->app->catalog.items[f->visible[f->selected_position]].platform_display:f->app->active_platform;
         (void)snprintf(subtitle,sizeof(subtitle),"%u juegos",(unsigned)f->visible_count);
     } else (void)snprintf(subtitle,sizeof(subtitle),"%u consolas   •   %u juegos",(unsigned)f->group_count,(unsigned)f->app->catalog.count);
     if (logo && !strcmp(logo,"ui_star"))
@@ -323,7 +329,7 @@ static void heading(const VpUiFrame *f) {
     text(f,VP_TYPE_PAGE_TITLE,172,115,620,wall_primary,title);
     text(f,VP_TYPE_PAGE_SUBTITLE,173,140,610,wall_muted,subtitle);
     if (f->app->library_level==VP_LEVEL_ROMS && f->visible_count) {
-        char count[32]; (void)snprintf(count,sizeof(count),"%u / %u",(unsigned)position(f)+1,(unsigned)f->visible_count);
+        char count[32]; (void)snprintf(count,sizeof(count),"%u / %u",(unsigned)f->selected_position+1,(unsigned)f->visible_count);
         text(f,VP_TYPE_STATUS,870,141,70,wall_primary,count);
     }
 }
@@ -428,7 +434,7 @@ static void tag(const VpUiFrame *f,int x,int y,int width,const char *value) {
 }
 
 static void roms(const VpUiFrame *f) {
-    size_t pos=position(f),i,start;
+    size_t pos=f->selected_position,i,start;
     const VpItem *selected=&f->app->catalog.items[f->visible[pos]];
     if (f->app->active_view==VP_VIEW_GRID) {
         float scroll=f->grid_scroll;
@@ -818,7 +824,7 @@ static void footer(const VpUiFrame *f) {
     text(f,VP_TYPE_FOOTER,121,518,210,C(20,40,83,255),"Cambiar sección");
     vita2d_draw_line(341,502,341,524,C(116,146,206,120));
     if (roms) {
-        const VpItem *item=&f->app->catalog.items[f->visible[position(f)]];
+        const VpItem *item=&f->app->catalog.items[f->visible[f->selected_position]];
         if (item->installed) action="Jugar";
         else if (item->source==VP_SOURCE_HOMEBREW) action="Instalar";
     }
@@ -852,11 +858,11 @@ static void footer(const VpUiFrame *f) {
 
 void vp_ui_render(const VpUiFrame *f) {
     unsigned long long now=sceKernelGetProcessTimeWide();
-    bg=color(f->app->theme.background,C(53,75,124,255));
-    surface=color(f->app->theme.surface,C(141,169,230,255));
-    ink=color(f->app->theme.text,C(250,252,255,255));
-    muted=color(f->app->theme.muted,C(204,220,249,255));
-    accent=color(f->app->theme.accent,C(79,159,255,255));
+    bg=cached_color(f->app->theme.background,C(53,75,124,255),0);
+    surface=cached_color(f->app->theme.surface,C(141,169,230,255),1);
+    ink=cached_color(f->app->theme.text,C(250,252,255,255),2);
+    muted=cached_color(f->app->theme.muted,C(204,220,249,255),3);
+    accent=cached_color(f->app->theme.accent,C(79,159,255,255),4);
     resolve_text_colors(f);
     backdrop(f,now); header(f); heading(f);
     if (f->app->active_screen==VP_SCREEN_LIBRARY) {

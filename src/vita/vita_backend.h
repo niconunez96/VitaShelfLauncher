@@ -12,7 +12,7 @@ long vp_vita_probe_romm(const char *url, const char *bearer_token,
                         char *response, size_t response_capacity, void *context);
 long vp_vita_probe_service(const char *url, const char *bearer_token,
                            char *response, size_t response_capacity, void *context);
-const char *vp_vita_last_error(void);
+void vp_vita_last_error(char *destination, size_t capacity);
 void vp_vita_set_error(const char *message);
 bool vp_vita_path_exists(const char *path);
 bool vp_vita_extract_psp_archive(const VpItem *item, const char *archive_path,

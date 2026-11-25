@@ -43,6 +43,7 @@ typedef struct {
     unsigned long long storage_free, storage_total;
     bool touch_scrolling;
     float touch_scroll, list_scroll, grid_scroll;
+    size_t selected_position;
     int carousel_base;
     vita2d_texture *selected_cover;
 } VpUiFrame;

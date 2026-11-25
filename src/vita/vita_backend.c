@@ -11,6 +11,7 @@
 #include <zip.h>
 
 #include <ctype.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -73,14 +74,27 @@ static char extract_block[8192];
 static char transfer_url[VP_URL * 3];
 static char transform_url[VP_URL * 3];
 static char last_error[VP_TEXT];
+static pthread_mutex_t last_error_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-const char *vp_vita_last_error(void) {
-    return last_error[0] != '\0' ? last_error : "sin detalle";
+/* Workers write errors while the UI thread formats notifications. Callers own
+ * the destination, so two readers can never overwrite each other's text. */
+void vp_vita_last_error(char *destination, size_t capacity) {
+    if (destination == NULL || capacity == 0) return;
+    pthread_mutex_lock(&last_error_mutex);
+    (void)snprintf(destination, capacity, "%s",
+                   last_error[0] != '\0' ? last_error : "sin detalle");
+    pthread_mutex_unlock(&last_error_mutex);
+}
+
+static void store_last_error(const char *message) {
+    pthread_mutex_lock(&last_error_mutex);
+    if (message == NULL || message[0] == '\0') last_error[0] = '\0';
+    else (void)snprintf(last_error, sizeof(last_error), "%.190s", message);
+    pthread_mutex_unlock(&last_error_mutex);
 }
 
 void vp_vita_set_error(const char *message) {
-    if (message == NULL || message[0] == '\0') last_error[0] = '\0';
-    else (void)snprintf(last_error, sizeof(last_error), "%.190s", message);
+    store_last_error(message);
 }
 
 static void record_psp_plugin_event(const char *step, int code) {
@@ -106,22 +120,23 @@ static bool psp_plugin_copy_failed(const char *step, int code) {
 }
 
 static void set_last_error(CURLcode result, long status, const char *response, bool truncated) {
-    const char *message;
+    char message[VP_TEXT];
+    const char *detail;
+    message[0] = '\0';
     if (truncated) {
-        (void)snprintf(last_error, sizeof(last_error),
+        (void)snprintf(message, sizeof(message),
                        "Respuesta demasiado grande (%u KiB); revisa network.log",
                        (unsigned)(VP_FETCH_RESPONSE_SIZE / 1024));
     } else if (result != CURLE_OK) {
-        (void)snprintf(last_error, sizeof(last_error), "Red: %s", curl_easy_strerror(result));
+        (void)snprintf(message, sizeof(message), "Red: %s", curl_easy_strerror(result));
     } else if (status == 422 && response != NULL &&
-               (message = strstr(response, "\"msg\":\"")) != NULL) {
-        message += strlen("\"msg\":\"");
-        (void)snprintf(last_error, sizeof(last_error), "HTTP 422: %.96s", message);
+               (detail = strstr(response, "\"msg\":\"")) != NULL) {
+        detail += strlen("\"msg\":\"");
+        (void)snprintf(message, sizeof(message), "HTTP 422: %.96s", detail);
     } else if (status < 200 || status >= 300) {
-        (void)snprintf(last_error, sizeof(last_error), "HTTP %ld", status);
-    } else {
-        last_error[0] = '\0';
+        (void)snprintf(message, sizeof(message), "HTTP %ld", status);
     }
+    vp_vita_set_error(message);
 }
 
 static void record_http_failure(const char *url, CURLcode result, long status, const char *response,
@@ -1236,7 +1251,7 @@ static bool transform_image(const char *source_url, const char *bearer_token,
     downloaded = result == CURLE_OK && status >= 200 && status < 300 && source.used > 0;
     if (!downloaded) {
         if (source.exceeded)
-            (void)snprintf(last_error, sizeof(last_error), "Imagen original supera 8 MiB");
+            vp_vita_set_error("Imagen original supera 8 MiB");
         else
             set_last_error(result, status, NULL, false);
         record_http_failure(transfer_url, result, status, NULL, false);

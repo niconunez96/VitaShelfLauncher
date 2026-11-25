@@ -52,7 +52,9 @@ static VpApp application;
 static int saves, requests;
 static bool cache_ok=true;
 static long catalog_status;
-static const char *vp_vita_last_error(void) {return "catalog failure";}
+static void vp_vita_last_error(char *destination, size_t capacity) {
+    snprintf(destination, capacity, "%s", "catalog failure");
+}
 static void vp_vita_set_error(const char *error) {(void)error;}
 static long vp_vita_probe_romm(const char *u,const char *t,char *r,size_t n,void *c) {
     (void)u;(void)t;(void)c;
@@ -90,7 +92,8 @@ finish:;
     unsigned long romm_revision=revision;
     VpRommConnectionState romm_state=job->romm_state;
     bool token_exchanged=job->token_exchanged;
-    const char *error=vp_vita_last_error();
+    char error[VP_TEXT];
+    vp_vita_last_error(error, sizeof(error));
 '''
         cases = r'''
 }
