@@ -223,9 +223,11 @@ void vp_ui_carousel_motion_update(VpUiCarouselMotion *m, size_t selected, size_t
         m->pop=fmaxf(m->from_pop*(1-vp_ui_ease(progress)),sinf(3.14159265f*progress));
         return;
     }
-    /* Catalog wraps: jump to the adjacent card instead of sweeping every game. */
+    /* Catalog wraps: express the pose in the destination's virtual space.
+       The nearest equivalent is one card away, so it slides instead of
+       snapping or sweeping through every game. */
     if ((selected==0 && m->selected==total-1) || (selected==total-1 && m->selected==0))
-        m->scroll=target;
+        m->scroll+=(selected==0?-(float)total:(float)total);
     /* Retargeting keeps the current interpolated pose, so no frame jumps. */
     m->from_scroll=m->scroll;
     m->from_pop=m->pop;

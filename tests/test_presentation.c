@@ -126,23 +126,45 @@ static void test_carousel_motion(void) {
     assert(!memcmp(&center,&r,sizeof(r)));
     vp_ui_carousel_motion_update(&m,7,12,1300000,0);
     assert(m.scroll==7 && m.pop==0);
+    /* A catalog wrap keeps the pose and slides one card, like any other step. */
     vp_ui_carousel_motion_update(&m,11,12,1400000,180);
-    vp_ui_carousel_motion_update(&m,0,12,1400000,180);
-    assert(m.scroll==0);
+    vp_ui_carousel_motion_update(&m,11,12,1580000,180);
+    assert(m.scroll==11 && m.pop==0);
+    before=vp_ui_carousel_motion_tile(&m,11);
+    vp_ui_carousel_motion_update(&m,0,12,1580000,180);
+    after=vp_ui_carousel_motion_tile(&m,-1);
+    assert(!memcmp(&before,&after,sizeof(before))); /* virtual -1 is the last game */
+    assert(m.scroll==-1 && m.from_scroll==-1 && m.pop==0);
+    vp_ui_carousel_motion_update(&m,0,12,1670000,180);
+    assert(m.scroll>-1 && m.scroll<0 && m.pop>0);
+    assert(vp_ui_carousel_motion_tile(&m,-1).x<370); /* outgoing card leaves the center */
+    assert(vp_ui_carousel_motion_tile(&m,0).x>370 && vp_ui_carousel_motion_tile(&m,0).x<604);
     for (i=0;i<=180;i+=15) {
         int position;
-        vp_ui_carousel_motion_update(&m,0,12,1500000+i*1000,180);
+        vp_ui_carousel_motion_update(&m,0,12,1700000+i*1000,180);
         for (position=-VP_UI_CAROUSEL_REACH;position<=VP_UI_CAROUSEL_REACH;position++) {
-            VpUiRect tile=vp_ui_carousel_motion_tile(&m,position);
+            float offset=(float)position-m.scroll;
+            VpUiRect tile;
+            if (fabsf(offset)>VP_UI_CAROUSEL_PAGE/2.f+.5f) continue;
+            tile=vp_ui_carousel_motion_tile(&m,position);
             assert(tile.x>=-200 && tile.x<=1000 && tile.y>=130 && tile.y+tile.h<=420);
         }
     }
     assert(m.scroll==0 && m.pop==0);
-    vp_ui_carousel_motion_update(&m,5,13,1700000,180);
+    before=vp_ui_carousel_motion_tile(&m,0);
+    vp_ui_carousel_motion_update(&m,11,12,1900000,180);
+    after=vp_ui_carousel_motion_tile(&m,12);
+    assert(!memcmp(&before,&after,sizeof(before)));
+    assert(m.scroll==12 && m.from_scroll==12 && m.pop==0);
+    vp_ui_carousel_motion_update(&m,11,12,1990000,180);
+    assert(m.scroll>11 && m.scroll<12 && m.pop>0);
+    vp_ui_carousel_motion_update(&m,11,12,2080000,180);
+    assert(m.scroll==11 && m.pop==0);
+    vp_ui_carousel_motion_update(&m,5,13,2200000,180);
     assert(m.count==13 && m.scroll==5 && m.pop==0);
-    vp_ui_carousel_motion_update(&m,0,0,1800000,180);
+    vp_ui_carousel_motion_update(&m,0,0,2300000,180);
     assert(m.count==0 && m.scroll==0);
-    vp_ui_carousel_motion_update(&m,0,1,1900000,180);
+    vp_ui_carousel_motion_update(&m,0,1,2400000,180);
     assert(m.count==1 && m.scroll==0 && m.pop==0);
 }
 
