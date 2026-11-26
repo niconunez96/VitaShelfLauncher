@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"golang.org/x/image/draw"
 )
@@ -28,12 +29,17 @@ var (
 	errTooManyPixels  = errors.New("source image has too many pixels")
 )
 
-// Config controls image-size limits.
+// Config controls image-size limits and, when both credentials are set,
+// enables protocol v1 authentication and its quotas.
 type Config struct {
 	MaxSourceBytes  int64
 	MaxPixels       int
 	MaxOutputPixels int
 	Logger          *log.Logger
+	Key             string
+	KeyID           string
+	Clock           func() time.Time
+	Limits          RateLimits
 }
 
 type handler struct {
@@ -41,6 +47,9 @@ type handler struct {
 	maxPixels       int
 	maxOutputPixels int
 	logger          *log.Logger
+	auth            *authService
+	limiter         *requestLimiter
+	cacheControl    string
 }
 
 func main() {
@@ -48,9 +57,33 @@ func main() {
 	if address == "" {
 		address = ":8090"
 	}
+	key := os.Getenv("IMAGE_PROXY_KEY")
+	keyID := os.Getenv("IMAGE_PROXY_KEY_ID")
+	publicMode, err := resolveAuthMode(key, keyID)
+	if err != nil {
+		log.Fatalf("imageproxy configuration: %v", err)
+	}
+	if publicMode {
+		log.Print("imageproxy starting in public mode: authentication and quotas enabled")
+	} else {
+		log.Print("imageproxy starting in local mode: no authentication or new quotas")
+	}
+	server := newServer(address, Config{Key: key, KeyID: keyID})
 	log.Printf("imageproxy listening on %s", address)
-	if err := http.ListenAndServe(address, NewHandler(Config{})); err != nil {
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func newServer(address string, config Config) *http.Server {
+	return &http.Server{
+		Addr:              address,
+		Handler:           NewHandler(config),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       30 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 }
 
@@ -68,12 +101,19 @@ func NewHandler(config Config) http.Handler {
 	if config.Logger == nil {
 		config.Logger = log.Default()
 	}
-	return &handler{
+	service := &handler{
 		maxSourceBytes:  config.MaxSourceBytes,
 		maxPixels:       config.MaxPixels,
 		maxOutputPixels: config.MaxOutputPixels,
 		logger:          config.Logger,
+		cacheControl:    "public, max-age=86400",
 	}
+	if config.Key != "" && config.KeyID != "" {
+		service.auth = newAuthService(config.Key, config.KeyID, config.Clock, nil, config.Logger)
+		service.limiter = newRequestLimiter(config.Limits, config.Clock)
+		service.cacheControl = "private, max-age=86400"
+	}
+	return service
 }
 
 func (service *handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -87,6 +127,14 @@ func (service *handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		_, _ = writer.Write([]byte("ok\n"))
 		return
 	}
+	if service.auth != nil && request.Method == http.MethodPost && request.URL.Path == "/v1/challenge" {
+		service.handleChallenge(writer, request)
+		return
+	}
+	if service.auth != nil && request.Method == http.MethodPost && request.URL.Path == "/v1/session" {
+		service.handleSession(writer, request)
+		return
+	}
 	if request.Method != http.MethodPost {
 		writer.Header().Set("Allow", http.MethodPost)
 		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
@@ -95,6 +143,23 @@ func (service *handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	if request.URL.Path != "/image" {
 		http.NotFound(writer, request)
 		return
+	}
+	if service.auth != nil {
+		installationID, ok := service.auth.authenticate(request.Header.Get("Authorization"))
+		if !ok {
+			http.Error(writer, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if allowed, retryAfter := service.limiter.allowImage(installationID, clientIP(request)); !allowed {
+			writeRateLimit(writer, retryAfter)
+			return
+		}
+		release, ok := service.limiter.acquire(installationID)
+		if !ok {
+			writeRateLimit(writer, time.Second)
+			return
+		}
+		defer release()
 	}
 
 	width, height, err := parseDimensions(request)
@@ -126,7 +191,7 @@ func (service *handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		source = trimTransparent(source)
 	}
 	writer.Header().Set("Content-Type", "image/png")
-	writer.Header().Set("Cache-Control", "public, max-age=86400")
+	writer.Header().Set("Cache-Control", service.cacheControl)
 	output := image.Image(nil)
 	if mode == "contain" {
 		output = containAndScale(source, width, height)

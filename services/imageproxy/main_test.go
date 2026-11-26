@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestImageReturnsCenterCroppedPNG(t *testing.T) {
@@ -165,6 +166,46 @@ func TestImageDownscaleUsesQualityResampling(t *testing.T) {
 	boundary := color.NRGBAModel.Convert(decoded.At(49, 50)).(color.NRGBA)
 	if boundary.G == 0 || boundary.R == 255 {
 		t.Fatalf("expected blended edge at (49,50), got RGBA(%d,%d,%d,%d)", boundary.R, boundary.G, boundary.B, boundary.A)
+	}
+}
+
+func TestLocalModeKeepsUnauthenticatedBehavior(t *testing.T) {
+	handler := NewHandler(Config{})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/image?width=64&height=64", sourcePNG(t, 32, 32)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("local image status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if got := response.Header().Get("Cache-Control"); got != "public, max-age=86400" {
+		t.Fatalf("Cache-Control = %q, want public, max-age=86400", got)
+	}
+	for _, path := range []string{"/v1/challenge", "/v1/session"} {
+		response = httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, path, nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("local %s status = %d, want 404", path, response.Code)
+		}
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "ok\n" {
+		t.Fatalf("local health = %d %q, want 200 ok", response.Code, response.Body.String())
+	}
+}
+
+func TestServerUsesHardenedTimeouts(t *testing.T) {
+	server := newServer(":8090", Config{})
+	if server.Addr != ":8090" {
+		t.Fatalf("Addr = %q, want :8090", server.Addr)
+	}
+	if server.ReadHeaderTimeout != 5*time.Second || server.ReadTimeout != 10*time.Second ||
+		server.WriteTimeout != 60*time.Second || server.IdleTimeout != 30*time.Second ||
+		server.MaxHeaderBytes != 1<<20 {
+		t.Fatalf("unexpected server limits: header=%s read=%s write=%s idle=%s maxHeader=%d",
+			server.ReadHeaderTimeout, server.ReadTimeout, server.WriteTimeout, server.IdleTimeout, server.MaxHeaderBytes)
+	}
+	if server.Handler == nil {
+		t.Fatal("server.Handler is nil")
 	}
 }
 
