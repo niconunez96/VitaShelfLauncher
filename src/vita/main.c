@@ -1540,6 +1540,75 @@ ime_finished:
     settings_ime_active = false;
 }
 
+/* Controller navigation: analog directions and hold-to-repeat. */
+#define VP_NAV_DIRECTIONS (SCE_CTRL_UP | SCE_CTRL_DOWN | SCE_CTRL_LEFT | SCE_CTRL_RIGHT)
+#define VP_NAV_ACTION_BITS (SCE_CTRL_CROSS | SCE_CTRL_CIRCLE | SCE_CTRL_SQUARE | \
+                            SCE_CTRL_TRIANGLE | SCE_CTRL_SELECT | SCE_CTRL_START | \
+                            SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER)
+#define VP_ANALOG_CENTER 128
+#define VP_ANALOG_ENGAGE 40
+#define VP_ANALOG_RELEASE 24
+#define VP_NAV_REPEAT_DELAY 300000ULL
+#define VP_NAV_REPEAT_INTERVAL 140000ULL
+
+typedef struct {
+    unsigned int direction;
+    unsigned long long next_at;
+} VpNavRepeat;
+
+static VpNavRepeat nav_repeat;
+
+static void vp_nav_repeat_reset(VpNavRepeat *state) {
+    state->direction = 0;
+    state->next_at = 0;
+}
+
+static unsigned int vp_nav_digital_direction(unsigned int buttons) {
+    if (buttons & SCE_CTRL_UP) return SCE_CTRL_UP;
+    if (buttons & SCE_CTRL_DOWN) return SCE_CTRL_DOWN;
+    if (buttons & SCE_CTRL_LEFT) return SCE_CTRL_LEFT;
+    if (buttons & SCE_CTRL_RIGHT) return SCE_CTRL_RIGHT;
+    return 0;
+}
+
+static unsigned int vp_nav_analog_direction(unsigned char lx, unsigned char ly,
+                                             unsigned int active) {
+    int dx = (int)lx - VP_ANALOG_CENTER;
+    int dy = (int)ly - VP_ANALOG_CENTER;
+    int ax = dx < 0 ? -dx : dx;
+    int ay = dy < 0 ? -dy : dy;
+    int x_threshold = (active & (SCE_CTRL_LEFT | SCE_CTRL_RIGHT)) ?
+                      VP_ANALOG_RELEASE : VP_ANALOG_ENGAGE;
+    int y_threshold = (active & (SCE_CTRL_UP | SCE_CTRL_DOWN)) ?
+                      VP_ANALOG_RELEASE : VP_ANALOG_ENGAGE;
+    int x_active = ax >= x_threshold;
+    int y_active = ay >= y_threshold;
+    if (!x_active && !y_active) return 0;
+    if (x_active && (!y_active || ax >= ay)) return dx < 0 ? SCE_CTRL_LEFT : SCE_CTRL_RIGHT;
+    return dy < 0 ? SCE_CTRL_UP : SCE_CTRL_DOWN;
+}
+
+static unsigned int vp_controller_navigation(const SceCtrlData *pad,
+                                             unsigned int action_pressed,
+                                             unsigned long long now,
+                                             VpNavRepeat *state) {
+    unsigned int direction = vp_nav_digital_direction(pad->buttons);
+    if (!direction) direction = vp_nav_analog_direction(pad->lx, pad->ly, state->direction);
+    if (!direction) {
+        vp_nav_repeat_reset(state);
+        return 0;
+    }
+    if (direction != state->direction) {
+        state->direction = direction;
+        state->next_at = now + VP_NAV_REPEAT_DELAY;
+    } else if (now < state->next_at) {
+        return 0;
+    } else {
+        state->next_at = now + VP_NAV_REPEAT_INTERVAL;
+    }
+    return action_pressed ? 0 : direction;
+}
+
 static void handle_settings_input(VpApp *app, unsigned int pressed) {
     if (!settings_detail_active) {
         if (pressed & SCE_CTRL_UP && settings_section > 0) {
@@ -2993,6 +3062,7 @@ int main(void) {
         if (download_job_in_progress())
             (void)sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
         if (settings_ime_active) {
+            vp_nav_repeat_reset(&nav_repeat);
             (void)vita2d_common_dialog_update();
             settings_finish_ime(&app);
             background_job_poll(&app);
@@ -3027,6 +3097,12 @@ int main(void) {
         }
         refresh_catalog_view_cache(&app);
         touch_scroll_tick(&touch_gesture,sceKernelGetProcessTimeWide());
+        {
+            unsigned int action_pressed = pressed & VP_NAV_ACTION_BITS;
+            pressed = (pressed & ~VP_NAV_DIRECTIONS) |
+                      vp_controller_navigation(&pad, action_pressed,
+                                               sceKernelGetProcessTimeWide(), &nav_repeat);
+        }
         memset(&touch, 0, sizeof(touch));
         if (sceTouchPeek(SCE_TOUCH_PORT_FRONT, &touch, 1) >= 0)
             pressed |= touch_gesture_pressed(&touch, &touch_gesture);

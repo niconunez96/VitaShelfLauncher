@@ -50,6 +50,7 @@ test-vita-lifecycle:
 	python3 tests/test_sync_progress.py
 	python3 tests/test_settings_navigation.py
 	python3 tests/test_vita_touch_navigation.py
+	python3 tests/test_vita_controller_navigation.py
 	python3 tests/test_library_independent.py
 	python3 tests/test_cache_compatibility_independent.py
 
