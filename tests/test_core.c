@@ -624,14 +624,39 @@ static void test_launch_profiles(void) {
     assert(strcmp(profile->titleid, "FLYCASTDC") == 0);
     assert(profile->core[0] == '\0');
 
-    assert(vp_launch_config_set(&config, "nds", "DSVITA000:"));
     profile = vp_launch_config_find(&config, "nds");
     assert(profile != NULL);
     assert(strcmp(profile->titleid, "DSVITA000") == 0);
     assert(profile->core[0] == '\0');
-    assert(vp_build_launch_uri(profile, "ux0:data/vitashelflauncher/downloads/nds/metroid_7.nds",
+    assert(vp_build_launch_uri(profile, "ux0:data/dsvita/metroid_7.nds", uri, sizeof(uri)));
+    assert(strcmp(uri, "psgm:play?titleid=DSVITA000&param=ux0:data/dsvita/metroid_7.nds") == 0);
+    profile = vp_launch_config_find(&config, "ds");
+    assert(profile != NULL && strcmp(profile->titleid, "DSVITA000") == 0 &&
+           profile->core[0] == '\0');
+    profile = vp_launch_config_find(&config, "nintendo ds");
+    assert(profile != NULL && strcmp(profile->titleid, "DSVITA000") == 0 &&
+           profile->core[0] == '\0');
+    profile = vp_launch_config_find(&config, "nintendo-ds");
+    assert(profile != NULL && strcmp(profile->titleid, "DSVITA000") == 0 &&
+           profile->core[0] == '\0');
+
+    profile = vp_launch_config_find(&config, "3ds");
+    assert(profile != NULL);
+    assert(strcmp(profile->titleid, "AZAHARPSV") == 0);
+    assert(profile->core[0] == '\0');
+    assert(vp_build_launch_uri(profile, "ux0:data/vitashelflauncher/downloads/romm/3ds/pokemon.3ds",
                                uri, sizeof(uri)));
-    assert(strcmp(uri, "psgm:play?titleid=DSVITA000&param=ux0:data/vitashelflauncher/downloads/nds/metroid_7.nds") == 0);
+    assert(strcmp(uri, "psgm:play?titleid=AZAHARPSV&param="
+                       "ux0:data/vitashelflauncher/downloads/romm/3ds/pokemon.3ds") == 0);
+    profile = vp_launch_config_find(&config, "n3ds");
+    assert(profile != NULL && strcmp(profile->titleid, "AZAHARPSV") == 0 &&
+           profile->core[0] == '\0');
+    profile = vp_launch_config_find(&config, "nintendo-3ds");
+    assert(profile != NULL && strcmp(profile->titleid, "AZAHARPSV") == 0 &&
+           profile->core[0] == '\0');
+    profile = vp_launch_config_find(&config, "nintendo 3ds");
+    assert(profile != NULL && strcmp(profile->titleid, "AZAHARPSV") == 0 &&
+           profile->core[0] == '\0');
 
     assert(vp_launch_config_set(&config, "PSP", "VSCU00001:"));
     assert(vp_launch_config_find(&config, "psp") != NULL);

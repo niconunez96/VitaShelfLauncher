@@ -498,6 +498,13 @@ bool vp_vita_path_exists(const char *path) {
     return path_exists(path);
 }
 
+bool vp_vita_app_installed(const char *titleid) {
+    char eboot[VP_PATH];
+    if (titleid == NULL || titleid[0] == '\0') return false;
+    (void)snprintf(eboot, sizeof(eboot), "ux0:/app/%s/eboot.bin", titleid);
+    return path_exists(eboot);
+}
+
 #define VP_NDS_ARCHIVE_MAX_SIZE (2ULL * 1024ULL * 1024ULL * 1024ULL)
 
 static bool nds_archive_entry(const char *entry) {

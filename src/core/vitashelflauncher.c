@@ -822,10 +822,24 @@ static const VpDefaultLaunchProfile vp_default_launch_profiles[] = {
     {"wonderswan", "app0:/mednafen_wswan_libretro.self"}
 };
 
-/* Standalone Flycast Vita. The ROM path is passed as the launch URI param, so no core is used. */
-static const VpDefaultLaunchProfile vp_default_standalone_profiles[] = {
-    {"dreamcast", ""},
-    {"dc", ""}
+/* Standalone emulators. The ROM path is passed as the launch URI param, so no core is used. */
+typedef struct {
+    const char *platform;
+    const char *titleid;
+    const char *core;
+} VpStandaloneLaunchProfile;
+
+static const VpStandaloneLaunchProfile vp_default_standalone_profiles[] = {
+    {"dreamcast", "FLYCASTDC", ""},
+    {"dc", "FLYCASTDC", ""},
+    {"nds", "DSVITA000", ""},
+    {"ds", "DSVITA000", ""},
+    {"nintendo ds", "DSVITA000", ""},
+    {"nintendo-ds", "DSVITA000", ""},
+    {"3ds", "AZAHARPSV", ""},
+    {"n3ds", "AZAHARPSV", ""},
+    {"nintendo-3ds", "AZAHARPSV", ""},
+    {"nintendo 3ds", "AZAHARPSV", ""}
 };
 
 /* Cores bundled by RetroArch Vita. The set/core version match is a user decision. */
@@ -900,7 +914,8 @@ void vp_launch_config_init(VpLaunchConfig *config) {
                  sizeof(vp_default_standalone_profiles[0]);
          index++) {
         (void)vp_launch_profile_append(config, vp_default_standalone_profiles[index].platform,
-                                       "FLYCASTDC", vp_default_standalone_profiles[index].core);
+                                       vp_default_standalone_profiles[index].titleid,
+                                       vp_default_standalone_profiles[index].core);
     }
 }
 

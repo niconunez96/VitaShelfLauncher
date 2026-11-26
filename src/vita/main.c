@@ -2268,6 +2268,19 @@ static void activate_selected(VpApp *app) {
                            item->platform, item->platform);
             return;
         }
+        if (profile->core[0] == '\0') {
+            if (!strcmp(profile->titleid, "DSVITA000")) {
+                if (!vp_vita_app_installed(profile->titleid)) {
+                    show_notification(app, "Instala DSVita (DSVITA000) para abrir juegos DS");
+                    return;
+                }
+            } else if (!strcmp(profile->titleid, "AZAHARPSV")) {
+                if (!vp_vita_app_installed(profile->titleid)) {
+                    show_notification(app, "Instala Azahar Vita (AZAHARPSV) para abrir juegos 3DS");
+                    return;
+                }
+            }
+        }
         if (!vp_build_launch_uri(profile, item->launch_target, uri, sizeof(uri))) {
             (void)snprintf(app->notice, sizeof(app->notice), "No se pudo preparar el lanzamiento");
             return;

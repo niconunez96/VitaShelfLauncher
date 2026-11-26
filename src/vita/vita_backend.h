@@ -15,6 +15,7 @@ long vp_vita_probe_service(const char *url, const char *bearer_token,
 void vp_vita_last_error(char *destination, size_t capacity);
 void vp_vita_set_error(const char *message);
 bool vp_vita_path_exists(const char *path);
+bool vp_vita_app_installed(const char *titleid);
 bool vp_vita_extract_psp_archive(const VpItem *item, const char *archive_path,
                                  const char *psp_root, char *resolved,
                                  size_t resolved_capacity);

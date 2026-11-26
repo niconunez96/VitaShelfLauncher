@@ -212,6 +212,20 @@ class VitaRenderLifecycleTests(unittest.TestCase):
                      "show_notification(app, \"No se pudo abrir Adrenaline"):
             self.assertIn(call, psp)
 
+    def test_standalone_emulators_are_checked_before_launch(self):
+        activate = function_body("static void activate_selected")
+        for text in ("vp_vita_app_installed(", "DSVITA000", "AZAHARPSV",
+                     "Instala DSVita", "Instala Azahar Vita"):
+            self.assertIn(text, activate)
+        guard = activate.index("vp_vita_app_installed(")
+        self.assertLess(guard, activate.index("vp_build_launch_uri("))
+        self.assertLess(guard, activate.index("if (!vp_vita_launch_uri(uri))"))
+        backend = (ROOT / "src/vita" / "vita_backend.c").read_text()
+        helper = backend[backend.index("bool vp_vita_app_installed(") :]
+        helper = helper[: helper.index("\n}") + 2]
+        self.assertIn("ux0:/app/%s/eboot.bin", helper)
+        self.assertIn("path_exists(eboot", helper)
+
     def test_last_error_is_guarded_and_copied_to_caller_buffer(self):
         backend = (ROOT / "src/vita" / "vita_backend.c").read_text()
 
