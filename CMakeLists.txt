@@ -10,8 +10,24 @@ project(vitashelflauncher C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-add_library(vitashelflauncher_core src/core/vitashelflauncher.c src/core/vita_titles.c src/core/integrations.c src/core/library_preferences.c)
-target_include_directories(vitashelflauncher_core PUBLIC include)
+# Generated into the build tree so the build key never reaches compiler argv.
+# Untrusted builds leave these empty and compile the dev placeholder endpoint.
+set(VP_IMAGE_SERVICE_URL "$ENV{VP_IMAGE_SERVICE_URL}")
+if(VP_IMAGE_SERVICE_URL STREQUAL "")
+  set(VP_IMAGE_SERVICE_URL "https://images.example.invalid/image")
+elseif(NOT VP_IMAGE_SERVICE_URL MATCHES "^https://[A-Za-z0-9._~:/?&=+%,@-]+$")
+  message(FATAL_ERROR "VP_IMAGE_SERVICE_URL must be an HTTPS URL without quotes or whitespace")
+endif()
+set(VP_IMAGE_SERVICE_KEY_ID "$ENV{VP_IMAGE_SERVICE_KEY_ID}")
+set(VP_IMAGE_SERVICE_KEY "$ENV{VP_IMAGE_SERVICE_KEY}")
+if(NOT VP_IMAGE_SERVICE_KEY_ID MATCHES "^[A-Za-z0-9_-]*$" OR
+   NOT VP_IMAGE_SERVICE_KEY MATCHES "^[A-Za-z0-9_-]*$")
+  message(FATAL_ERROR "VP_IMAGE_SERVICE_KEY_ID and VP_IMAGE_SERVICE_KEY must be alphanumeric, '-' or '_'")
+endif()
+configure_file(image_service_build.h.in image_service_build.h @ONLY)
+
+add_library(vitashelflauncher_core src/core/vitashelflauncher.c src/core/vita_titles.c src/core/integrations.c src/core/library_preferences.c src/core/image_service_auth.c)
+target_include_directories(vitashelflauncher_core PUBLIC include PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_options(vitashelflauncher_core PRIVATE -Wall -Wextra -Werror)
 
 if(DEFINED ENV{VITASDK})
@@ -29,7 +45,9 @@ if(DEFINED ENV{VITASDK})
     src/vita/ui_backdrop.c
     src/vita/ui_presentation.c
     src/vita/ui_renderer.c
-    src/vita/vita_backend.c)
+    src/vita/vita_backend.c
+    src/vita/image_service.c)
+  target_include_directories(vitashelflauncher PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
   target_compile_definitions(vitashelflauncher PRIVATE VP_APP_VERSION="${VITA_VERSION}")
   # Catch large automatic buffers before they can exhaust a Vita thread stack.
   target_compile_options(vitashelflauncher PRIVATE -Werror=frame-larger-than=16384)

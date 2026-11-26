@@ -61,6 +61,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate and export release credentials
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          VP_IMAGE_SERVICE_KEY: ${{ secrets.VP_IMAGE_SERVICE_KEY }}
+          VP_IMAGE_SERVICE_KEY_ID: ${{ vars.VP_IMAGE_SERVICE_KEY_ID }}
+          VP_IMAGE_SERVICE_URL: ${{ vars.VP_IMAGE_SERVICE_URL }}
+        run: |
+          test -n "$VP_IMAGE_SERVICE_KEY" || { echo "Missing VP_IMAGE_SERVICE_KEY secret" >&2; exit 1; }
+          test -n "$VP_IMAGE_SERVICE_KEY_ID" || { echo "Missing VP_IMAGE_SERVICE_KEY_ID variable" >&2; exit 1; }
+          test -n "$VP_IMAGE_SERVICE_URL" || { echo "Missing VP_IMAGE_SERVICE_URL variable" >&2; exit 1; }
+          {
+            echo "VP_IMAGE_SERVICE_KEY<<VP_EOF"
+            echo "$VP_IMAGE_SERVICE_KEY"
+            echo "VP_EOF"
+            echo "VP_IMAGE_SERVICE_KEY_ID<<VP_EOF"
+            echo "$VP_IMAGE_SERVICE_KEY_ID"
+            echo "VP_EOF"
+            echo "VP_IMAGE_SERVICE_URL<<VP_EOF"
+            echo "$VP_IMAGE_SERVICE_URL"
+            echo "VP_EOF"
+          } >> "$GITHUB_ENV"
       - name: Build VPK with VitaSDK
         run: ./scripts/build-vpk.sh --clean
       - name: Upload VPK

@@ -73,6 +73,12 @@ fi
 mkdir -p "$root_dir/dist"
 relative_build_dir="${build_dir#"$root_dir"/}"
 docker_args=(--rm -e HOME=/tmp -v "$root_dir":/build -w /build)
+# Pass values by name only; the secret never appears in the command line or logs.
+for name in VP_IMAGE_SERVICE_KEY VP_IMAGE_SERVICE_KEY_ID VP_IMAGE_SERVICE_URL; do
+    if [[ -n "${!name:-}" ]]; then
+        docker_args+=("-e" "$name")
+    fi
+done
 
 # Removing the build directory from the host leaves stale directory entries in Colima's
 # shared filesystem, so CMake then fails reading its own freshly written cache. Run every

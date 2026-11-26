@@ -101,6 +101,32 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("gh release create", workflow)
         self.assertIn("--generate-notes", workflow)
 
+    def test_ci_workflow_never_exposes_image_service_key_to_pull_requests(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        steps = []
+        current = None
+        for line in workflow.splitlines():
+            if line.startswith("      - "):
+                if current is not None:
+                    steps.append(current)
+                current = [line]
+            elif current is not None and (line.startswith("        ") or not line.strip()):
+                current.append(line)
+            elif current is not None:
+                steps.append(current)
+                current = None
+        if current is not None:
+            steps.append(current)
+
+        secret_steps = [step for step in steps if "secrets.VP_IMAGE_SERVICE_KEY" in "\n".join(step)]
+        self.assertEqual(1, len(secret_steps))
+        body = "\n".join(secret_steps[0])
+        self.assertIn("if: github.event_name == 'push' && github.ref == 'refs/heads/main'", body)
+        self.assertIn('>> "$GITHUB_ENV"', body)
+        build_steps = [step for step in steps if "Build VPK with VitaSDK" in "\n".join(step)]
+        self.assertEqual(1, len(build_steps))
+        self.assertNotIn("secrets.VP_IMAGE_SERVICE_KEY", "\n".join(build_steps[0]))
+
     def test_local_vpk_builder_exposes_a_docker_free_interface(self) -> None:
         script = ROOT / "scripts" / "build-vpk-local.sh"
         result = subprocess.run([str(script), "--help"], cwd=ROOT, text=True, capture_output=True)
