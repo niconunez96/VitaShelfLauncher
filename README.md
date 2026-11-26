@@ -62,7 +62,11 @@ Con Adrenaline instalado, las descargas PSP de RomM en `.iso` o `.cso` se guarda
 
 Las descargas NDS de RomM se guardan en `ux0:/data/dsvita/` con la extensión del archivo original. Si el ZIP contiene una sola ROM `.nds`, se extrae allí y luego se elimina. Para iniciar el juego necesitas dsVita y la entrada `launch_nds=<titleid>` en `config.ini`. La carpeta `ux0:/data/dsvita/` debe existir antes de descargar: si falta, la app muestra un aviso y no inicia la descarga.
 
-### 5. Favoritos y filtros de biblioteca
+### 5. Juegos Dreamcast desde RomM
+
+Las descargas Dreamcast de RomM se guardan en `ux0:/data/vitashelflauncher/downloads/romm/dreamcast/` con la extensión del archivo original. Para iniciarlos hace falta Flycast Vita instalado, junto con `libshacccg.suprx`, `kubridge.skprx` y `fd_fix.skprx` o `repatch_ex.skprx`. VitaShelf abre juegos de un solo archivo `.chd`, `.cdi`, `.gdi` o `.cue` mediante `FLYCASTDC`; no incluye el emulador. Los juegos con varios archivos (por ejemplo, un `.gdi` con pistas `.bin`) no se descargan desde la app: descárgalos desde RomM y colócalos en la carpeta de contenido de Flycast. No hace falta agregar `launch_dreamcast` a `config.ini`: el valor predeterminado ya está incluido.
+
+### 6. Favoritos y filtros de biblioteca
 
 Presiona `SELECT` en la página principal de Biblioteca o dentro de una consola para abrir **Filtros**. Puedes mostrar juegos ocultos o limitar la biblioteca a juegos descargados; los filtros se comparten entre todas las consolas y se conservan al reiniciar. Dentro de una consola, `Cuadrado` abre las opciones para añadir o quitar favoritos y ocultar o mostrar el juego seleccionado. **Favoritos** aparece como la primera tarjeta de Biblioteca. Los juegos ocultos se muestran atenuados con un ojo tachado cuando el filtro permite verlos.
 
@@ -107,7 +111,11 @@ With Adrenaline installed, RomM PSP downloads in `.iso` or `.cso` are stored in 
 
 RomM NDS downloads are stored in `ux0:/data/dsvita/` with the source file extension. A ZIP containing exactly one `.nds` ROM is extracted there and then removed. Launching requires dsVita and a `launch_nds=<titleid>` entry in `config.ini`. The `ux0:/data/dsvita/` folder must already exist: if it is missing, the app shows a notice and does not start the download.
 
-### 6. Favourites and library filters
+### 6. Dreamcast games from RomM
+
+RomM Dreamcast downloads are stored in `ux0:/data/vitashelflauncher/downloads/romm/dreamcast/` with the source file extension. Launching requires Flycast Vita installed, along with `libshacccg.suprx`, `kubridge.skprx`, and `fd_fix.skprx` or `repatch_ex.skprx`. VitaShelf opens single-file `.chd`, `.cdi`, `.gdi`, or `.cue` games through `FLYCASTDC`; the emulator is not bundled. Multi-file sets (for example, a `.gdi` with `.bin` tracks) are not downloaded by the app: get them from RomM and place them in Flycast's content folder. No `launch_dreamcast` entry is needed in `config.ini`; the default is built in.
+
+### 7. Favourites and library filters
 
 Press `SELECT` on the main Library page or inside a console to open **Filters**. Show hidden games or limit the library to downloaded games; filters are shared across consoles and saved across restarts. Inside a console, `Square` opens options to add or remove a favourite and hide or show the selected game. **Favourites** is the first Library card. When hidden games are shown, their cards are dimmed with a crossed-eye icon.
 

@@ -611,6 +611,19 @@ static void test_launch_profiles(void) {
     assert(strcmp(uri, "psgm:play?titleid=RETROVITA&param=app0:/snes9x2005_libretro.self"
                        "&param2=ux0:data/vitashelflauncher/downloads/snes/supermetroid_42.sfc") == 0);
 
+    profile = vp_launch_config_find(&config, "dreamcast");
+    assert(profile != NULL);
+    assert(strcmp(profile->titleid, "FLYCASTDC") == 0);
+    assert(profile->core[0] == '\0');
+    assert(vp_build_launch_uri(profile, "ux0:data/vitashelflauncher/downloads/romm/dreamcast/testdrive.chd",
+                               uri, sizeof(uri)));
+    assert(strcmp(uri, "psgm:play?titleid=FLYCASTDC&param="
+                       "ux0:data/vitashelflauncher/downloads/romm/dreamcast/testdrive.chd") == 0);
+    profile = vp_launch_config_find(&config, "dc");
+    assert(profile != NULL);
+    assert(strcmp(profile->titleid, "FLYCASTDC") == 0);
+    assert(profile->core[0] == '\0');
+
     assert(vp_launch_config_set(&config, "nds", "DSVITA000:"));
     profile = vp_launch_config_find(&config, "nds");
     assert(profile != NULL);

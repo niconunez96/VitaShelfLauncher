@@ -822,6 +822,12 @@ static const VpDefaultLaunchProfile vp_default_launch_profiles[] = {
     {"wonderswan", "app0:/mednafen_wswan_libretro.self"}
 };
 
+/* Standalone Flycast Vita. The ROM path is passed as the launch URI param, so no core is used. */
+static const VpDefaultLaunchProfile vp_default_standalone_profiles[] = {
+    {"dreamcast", ""},
+    {"dc", ""}
+};
+
 /* Cores bundled by RetroArch Vita. The set/core version match is a user decision. */
 static const VpArcadeCore vp_arcade_cores[] = {
     {"auto", "Automático", ""},
@@ -888,6 +894,13 @@ void vp_launch_config_init(VpLaunchConfig *config) {
          index++) {
         (void)vp_launch_profile_append(config, vp_default_launch_profiles[index].platform,
                                        "RETROVITA", vp_default_launch_profiles[index].core);
+    }
+    for (index = 0;
+         index < sizeof(vp_default_standalone_profiles) /
+                 sizeof(vp_default_standalone_profiles[0]);
+         index++) {
+        (void)vp_launch_profile_append(config, vp_default_standalone_profiles[index].platform,
+                                       "FLYCASTDC", vp_default_standalone_profiles[index].core);
     }
 }
 
