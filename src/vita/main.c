@@ -2930,6 +2930,7 @@ int main(void) {
     bool curl_cleanup_allowed;
     bool request_quit = false;
     bool rendered_once = false;
+    vp_vita_thread_set_priority(VP_VITA_THREAD_PRIORITY_UI);
     vp_app_init(&app);
     vp_download_queue_init(&download_queue);
     vp_launch_config_init(&launch_config);

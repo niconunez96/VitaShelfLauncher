@@ -27,6 +27,18 @@ class VitaThreadPriorityTests(unittest.TestCase):
             priority(HEADER, "VP_VITA_THREAD_PRIORITY_BACKGROUND"),
         )
 
+    def test_ui_thread_runs_below_audio_but_above_background(self):
+        ui = priority(HEADER, "VP_VITA_THREAD_PRIORITY_UI")
+        self.assertLess(priority(HEADER, "VP_VITA_THREAD_PRIORITY_AUDIO"), ui)
+        self.assertLess(ui, priority(HEADER, "VP_VITA_THREAD_PRIORITY_BACKGROUND"))
+
+    def test_ui_thread_sets_priority_before_startup(self):
+        call = "vp_vita_thread_set_priority(VP_VITA_THREAD_PRIORITY_UI);"
+        main_start = MAIN.index("int main(void) {")
+        self.assertIn(call, MAIN[main_start:])
+        self.assertLess(MAIN.index(call), MAIN.index("curl_global_init(", main_start))
+        self.assertLess(MAIN.index(call), MAIN.index("for (;;) {", main_start))
+
     def test_priority_is_set_from_inside_the_thread(self):
         self.assertIn("sceKernelGetThreadId()", HEADER)
         self.assertIn("sceKernelChangeThreadPriority(", HEADER)
