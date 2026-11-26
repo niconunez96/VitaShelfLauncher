@@ -3,9 +3,9 @@ CFLAGS ?= -std=c11 -Wall -Wextra -Werror -pedantic -Iinclude
 CORE = src/core/vitashelflauncher.c src/core/vita_titles.c src/core/integrations.c src/core/library_preferences.c
 TEST = build/test_core
 
-.PHONY: test test-preferences test-integrations test-local-library test-ui test-vita-lifecycle test-assets test-renderer test-release-automation clean
+.PHONY: test test-preferences test-integrations test-image-service-auth test-local-library test-ui test-vita-lifecycle test-assets test-renderer test-release-automation clean
 
-test: $(TEST) test-preferences test-integrations test-local-library test-ui test-vita-lifecycle test-release-automation
+test: $(TEST) test-preferences test-integrations test-image-service-auth test-local-library test-ui test-vita-lifecycle test-release-automation
 	$(TEST)
 
 test-preferences: build/test_library_preferences
@@ -21,6 +21,13 @@ test-integrations: build/test_integrations
 build/test_integrations: src/core/integrations.c tests/test_integrations.c include/integrations.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) src/core/integrations.c tests/test_integrations.c -o $@
+
+test-image-service-auth: build/test_image_service_auth
+	build/test_image_service_auth
+
+build/test_image_service_auth: src/core/image_service_auth.c include/image_service_auth.h tests/test_image_service_auth.c
+	@mkdir -p build
+	$(CC) $(CFLAGS) src/core/image_service_auth.c tests/test_image_service_auth.c -o $@
 
 test-local-library: build/test_local_library
 	build/test_local_library

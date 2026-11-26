@@ -32,6 +32,8 @@
 #include "vita_thread_priority.h"
 #include "local_library.h"
 #include "integrations.h"
+#include "image_service_auth.h"
+#include "image_service.h"
 
 /* vitasdk 2026.08 omits these from SceAppMgrSystemEventType. The ABI values are
  * stable and are declared in newer vita-headers releases. */
@@ -74,6 +76,11 @@ static bool settings_detail_active;
 static bool settings_integration_active;
 static int settings_integration;
 static char steamgrid_api_key[VP_TEXT];
+static char image_install_id[VP_TEXT];
+static bool image_proxy_auto_default;
+static bool providers_config_exists;
+static bool image_check_pending;
+static bool image_check_silent_request;
 static VpConnectionState steamgrid_state, image_service_state;
 static unsigned long integration_revision;
 static bool local_scan_pending=true;
@@ -157,6 +164,7 @@ typedef struct {
     char steamgrid_key[VP_TEXT];
     unsigned long integration_revision;
     VpConnectionState connection_state;
+    bool image_check_silent;
     size_t omitted;
     size_t covers_missing;
     VpUiSyncStatus sync;
@@ -367,6 +375,11 @@ static void show_notification(VpApp *app, const char *format, ...) {
     va_start(arguments, format);
     (void)vsnprintf(app->notice, sizeof(app->notice), format, arguments);
     va_end(arguments);
+    if (background_job.image_check_silent && background_job.kind == VP_JOB_CHECK_IMAGES &&
+        strstr(app->notice, "Image Service: conexión") != NULL) {
+        background_job.image_check_silent=false;
+        return;
+    }
     app->notice_id++;
 }
 
@@ -476,33 +489,50 @@ static void load_providers(VpApp *app) {
         }
     }
     load_theme_file(app, "app0:assets/default/theme.ini");
-    if (file == NULL) return;
-    while (fgets(line, sizeof(line), file) != NULL) {
-        char *equals = strchr(line, '=');
-        if (equals == NULL || line[0] == '#') continue;
-        *equals++ = '\0';
-        trim(line);
-        trim(equals);
-        if (strcmp(line, "romm_url") == 0) (void)snprintf(romm_config.base_url, sizeof(romm_config.base_url), "%s", equals);
-        else if (strcmp(line, "romm_token") == 0) (void)snprintf(romm_config.token, sizeof(romm_config.token), "%s", equals);
-        else if (strcmp(line, "image_proxy_url") == 0)
-            (void)snprintf(romm_config.image_proxy_url, sizeof(romm_config.image_proxy_url), "%s", equals);
-        else if (strcmp(line, "image_service_host") == 0)
-            (void)vp_image_service_endpoint(equals, "image", romm_config.image_proxy_url, sizeof(romm_config.image_proxy_url));
-        else if (strcmp(line, "steamgriddb_api_key") == 0)
-            (void)snprintf(steamgrid_api_key, sizeof(steamgrid_api_key), "%s", equals);
-        else if (strcmp(line, "homebrew_catalog") == 0)
-            (void)snprintf(homebrew_config.catalog_url, sizeof(homebrew_config.catalog_url), "%s", equals);
-        else if (strcmp(line, "active_theme") == 0)
-            (void)snprintf(active_theme, sizeof(active_theme), "%s", equals);
-        else if (strcmp(line, "active_view") == 0 && vp_view_from_string(equals, &configured_view))
-            active_view_configured = true;
-        else if (strncmp(line, "ui_wallpaper", 12) == 0 || strcmp(line, "ui_text_color") == 0)
-            (void)vp_ui_preferences_set(&ui_preferences, line, equals);
-        else if (strncmp(line, "launch_", 7) == 0)
-            (void)vp_launch_config_set(&launch_config, line + 7, equals);
+#ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
+    providers_config_exists = file != NULL;
+    image_proxy_auto_default = false;
+#endif
+    if (file != NULL) {
+        while (fgets(line, sizeof(line), file) != NULL) {
+            char *equals = strchr(line, '=');
+            if (equals == NULL || line[0] == '#') continue;
+            *equals++ = '\0';
+            trim(line);
+            trim(equals);
+            if (strcmp(line, "romm_url") == 0) (void)snprintf(romm_config.base_url, sizeof(romm_config.base_url), "%s", equals);
+            else if (strcmp(line, "romm_token") == 0) (void)snprintf(romm_config.token, sizeof(romm_config.token), "%s", equals);
+            else if (strcmp(line, "image_proxy_url") == 0)
+                (void)snprintf(romm_config.image_proxy_url, sizeof(romm_config.image_proxy_url), "%s", equals);
+#ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
+            else if (strcmp(line, "image_install_id") == 0)
+                (void)snprintf(image_install_id, sizeof(image_install_id), "%s", equals);
+#endif
+            else if (strcmp(line, "image_service_host") == 0)
+                (void)vp_image_service_endpoint(equals, "image", romm_config.image_proxy_url, sizeof(romm_config.image_proxy_url));
+            else if (strcmp(line, "steamgriddb_api_key") == 0)
+                (void)snprintf(steamgrid_api_key, sizeof(steamgrid_api_key), "%s", equals);
+            else if (strcmp(line, "homebrew_catalog") == 0)
+                (void)snprintf(homebrew_config.catalog_url, sizeof(homebrew_config.catalog_url), "%s", equals);
+            else if (strcmp(line, "active_theme") == 0)
+                (void)snprintf(active_theme, sizeof(active_theme), "%s", equals);
+            else if (strcmp(line, "active_view") == 0 && vp_view_from_string(equals, &configured_view))
+                active_view_configured = true;
+            else if (strncmp(line, "ui_wallpaper", 12) == 0 || strcmp(line, "ui_text_color") == 0)
+                (void)vp_ui_preferences_set(&ui_preferences, line, equals);
+            else if (strncmp(line, "launch_", 7) == 0)
+                (void)vp_launch_config_set(&launch_config, line + 7, equals);
+        }
+        fclose(file);
     }
-    fclose(file);
+#ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
+    if (!vp_image_auth_valid_install_id(image_install_id)) image_install_id[0] = '\0';
+    if (romm_config.image_proxy_url[0] == '\0' && romm_config.base_url[0] == '\0') {
+        (void)snprintf(romm_config.image_proxy_url, sizeof(romm_config.image_proxy_url), "%s",
+                       vp_image_auth_official_url());
+        image_proxy_auto_default = true;
+    }
+#endif
     if (strcmp(active_theme, "default") != 0) {
         char path[VP_PATH];
         (void)snprintf(path, sizeof(path), "ux0:data/vitashelflauncher/themes/%s/theme.ini", active_theme);
@@ -524,9 +554,16 @@ static bool save_romm_config(void) {
     if (existing != NULL) (void)fclose(existing);
     file = fopen(VP_CONFIG_PATH ".tmp", "w");
     if (file == NULL) return false;
+#ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
+    (void)fprintf(file, "romm_url=%s\nromm_token=%s\nimage_proxy_url=%s\nimage_install_id=%s\n"
+                        "homebrew_catalog=%s\nactive_theme=%s\n",
+                    romm_config.base_url, romm_config.token, romm_config.image_proxy_url,
+                      image_install_id, homebrew_config.catalog_url, active_theme);
+#else
     (void)fprintf(file, "romm_url=%s\nromm_token=%s\nimage_proxy_url=%s\nhomebrew_catalog=%s\nactive_theme=%s\n",
                    romm_config.base_url, romm_config.token, romm_config.image_proxy_url,
                      homebrew_config.catalog_url, active_theme);
+#endif
     (void)fprintf(file, "steamgriddb_api_key=%s\n", steamgrid_api_key);
     (void)fprintf(file, "active_view=%s\n", vp_view_name(app.active_view));
     (void)fprintf(file, "ui_wallpaper=%s\nui_text_color=%s\nui_wallpaper_animated=%d\n",
@@ -850,6 +887,11 @@ static void *background_job_run(void *context) {
         job->connection_state=kind==VP_JOB_CHECK_STEAMGRID?
             vp_steamgrid_check(job->steamgrid_key,backend):vp_image_service_check(
                 config.image_proxy_url[0]?config.image_proxy_url:config.base_url,backend);
+        if (kind==VP_JOB_CHECK_IMAGES && vp_image_session_active() &&
+            !vp_image_session_ensure(config.image_proxy_url)) {
+            if (job->connection_state==VP_CONNECTION_CONNECTED)
+                job->connection_state=VP_CONNECTION_UNREACHABLE;
+        }
         succeeded=job->connection_state==VP_CONNECTION_CONNECTED;
     } else if (kind == VP_JOB_SYNC_STEAMGRID) {
         VpRommProbeBackend backend={vp_vita_probe_service,NULL};
@@ -979,6 +1021,7 @@ static bool background_job_start(VpJobKind kind, const VpItem *item, const char 
     background_job.romm_state = VP_ROMM_UNREACHABLE;
     background_job.token_exchanged = false;
     background_job.connection_state=VP_CONNECTION_UNCONFIGURED;
+    background_job.image_check_silent=false;
     background_job.integration_revision=integration_revision;
     background_job.omitted=0;
     background_job.covers_missing=0;
@@ -1492,6 +1535,9 @@ static void settings_finish_ime(VpApp *app) {
     if (result.button == SCE_IME_DIALOG_BUTTON_ENTER) {
         if (settings_integration!=VP_INTEGRATION_ROMM) {
             char candidate[VP_URL], previous[VP_URL], endpoint[VP_URL];
+#ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
+            bool previous_auto_default=image_proxy_auto_default;
+#endif
             char *value=settings_integration==VP_INTEGRATION_STEAMGRID?steamgrid_api_key:romm_config.image_proxy_url;
             size_t capacity=settings_integration==VP_INTEGRATION_STEAMGRID?sizeof(steamgrid_api_key):sizeof(romm_config.image_proxy_url);
             settings_wide_to_text(settings_ime_buffer,candidate,sizeof(candidate));
@@ -1503,11 +1549,21 @@ static void settings_finish_ime(VpApp *app) {
                 show_notification(app,"Valor inválido; usa un host HTTP(S) para Image Service");
             } else {
                 (void)snprintf(value,capacity,"%s",settings_integration==VP_INTEGRATION_IMAGES && candidate[0]?endpoint:candidate);
+#ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
+                if (settings_integration==VP_INTEGRATION_IMAGES) image_proxy_auto_default=false;
+#endif
                 if (!save_romm_config()) {
                     (void)snprintf(value,capacity,"%s",previous);
+#ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
+                    image_proxy_auto_default=previous_auto_default;
+#endif
                     show_notification(app,"No se pudo guardar la configuración");
                 } else {
                     integration_revision++;
+#ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
+                    (void)vp_image_session_configure(romm_config.image_proxy_url[0]?
+                        romm_config.image_proxy_url:NULL);
+#endif
                     steamgrid_state=steamgrid_api_key[0]?VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
                     image_service_state=romm_config.image_proxy_url[0]?VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
                     show_notification(app,"Configuración guardada; selecciona Probar conexión");
@@ -1522,9 +1578,22 @@ static void settings_finish_ime(VpApp *app) {
         (void)snprintf(previous, sizeof(previous), "%s", value);
         settings_wide_to_text(settings_ime_buffer, value, capacity);
         if (settings_field == 0 && strcmp(previous, value) != 0) {
+#ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
+            if (image_proxy_auto_default && !romm_config.image_proxy_url[0]) {
+                image_proxy_auto_default=false;
+            } else if (image_proxy_auto_default &&
+                       strcmp(romm_config.image_proxy_url, vp_image_auth_official_url()) == 0) {
+                romm_config.image_proxy_url[0]='\0';
+                image_proxy_auto_default=false;
+            }
+#endif
             vp_romm_connection_reset(&romm_connection, &romm_config);
             romm_check_pending = romm_connection.state == VP_ROMM_CHECKING;
             memset(romm_pair_code, 0, sizeof(romm_pair_code));
+#ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
+            (void)vp_image_session_configure(romm_config.image_proxy_url[0]?
+                romm_config.image_proxy_url:NULL);
+#endif
             if (!romm_config.image_proxy_url[0]) {
                 integration_revision++;
                 image_service_state=romm_config.base_url[0]?VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
@@ -3041,6 +3110,21 @@ int main(void) {
     (void)sceIoMkdir("ux0:pspemu", 0777);
     (void)sceIoMkdir(VP_PSP_ISO_ROOT, 0777);
     load_providers(&app);
+    {
+        char previous_install_id[VP_TEXT];
+        (void)snprintf(previous_install_id, sizeof(previous_install_id), "%s", image_install_id);
+        if (!vp_image_session_installation_id(image_install_id, sizeof(image_install_id)))
+            image_install_id[0]='\0';
+        (void)vp_image_session_configure(romm_config.image_proxy_url[0]?
+            romm_config.image_proxy_url:NULL);
+        if (strcmp(previous_install_id, image_install_id) != 0 &&
+            (providers_config_exists || vp_image_session_active()))
+            (void)save_romm_config();
+        if (vp_image_session_active()) {
+            image_check_pending=true;
+            image_check_silent_request=true;
+        }
+    }
     steamgrid_state=steamgrid_api_key[0]?VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
     image_service_state=romm_config.image_proxy_url[0] || romm_config.base_url[0]?
         VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
@@ -3086,6 +3170,16 @@ int main(void) {
                     (void)background_job_start(VP_JOB_SCAN_LOCAL,NULL,NULL,NULL);
                 if (romm_check_pending)
                     (void)background_job_start(VP_JOB_VALIDATE_ROMM, NULL, NULL, NULL);
+                if (image_check_pending &&
+                    background_job_start(VP_JOB_CHECK_IMAGES, NULL, NULL, NULL)) {
+                    image_check_pending=false;
+                    if (image_check_silent_request) {
+                        pthread_mutex_lock(&background_job.mutex);
+                        background_job.image_check_silent=true;
+                        pthread_mutex_unlock(&background_job.mutex);
+                        image_check_silent_request=false;
+                    }
+                }
             }
         }
         sceCtrlPeekBufferPositive(0, &pad, 1);

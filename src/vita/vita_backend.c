@@ -1,4 +1,5 @@
 #include "vita_backend.h"
+#include "image_service.h"
 
 #include <curl/curl.h>
 #include <psp2/appmgr.h>
@@ -1210,20 +1211,107 @@ bool vp_vita_transfer_with_progress(const char *url, const char *bearer_token,
     return installed;
 }
 
+typedef struct {
+    long status;
+    char retry_after[64];
+} TransformUploadResult;
+
+static void capture_transform_retry_after(const char *line, TransformUploadResult *result) {
+    static const char prefix[] = "Retry-After:";
+    const char *value;
+    size_t length;
+    if (result->retry_after[0] != '\0' ||
+        strncasecmp(line, prefix, sizeof(prefix) - 1U) != 0) return;
+    value = line + sizeof(prefix) - 1U;
+    while (*value == ' ' || *value == '\t') value++;
+    length = strcspn(value, "\r\n");
+    if (length == 0 || length + 1U > sizeof(result->retry_after)) return;
+    memcpy(result->retry_after, value, length);
+    result->retry_after[length] = '\0';
+}
+
+static size_t transform_header_write(char *data, size_t size, size_t count, void *context) {
+    TransformUploadResult *result = context;
+    size_t bytes = size * count;
+    char line[128];
+    if (bytes == 0) return 0;
+    if (bytes < sizeof(line)) {
+        memcpy(line, data, bytes);
+        line[bytes] = '\0';
+        capture_transform_retry_after(line, result);
+    }
+    return bytes;
+}
+
+static bool post_transform(const char *url, const SceIoStat *source_stat,
+                           const char *authorization, const char *destination,
+                           bool no_redirect, TransformUploadResult *result) {
+    CURL *curl = NULL;
+    struct curl_slist *headers = NULL;
+    DownloadFile upload = {-1};
+    DownloadFile output = {-1};
+    CURLcode code = CURLE_OK;
+    bool uploaded = false;
+    memset(result, 0, sizeof(*result));
+    upload.fd = sceIoOpen(VP_COVER_SOURCE_PATH, SCE_O_RDONLY, 0);
+    output.fd = sceIoOpen(destination, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+    if (upload.fd < 0 || output.fd < 0) goto finish;
+    curl = curl_easy_init();
+    if (curl == NULL) goto finish;
+    headers = curl_slist_append(headers, "Content-Type: application/octet-stream");
+    if (headers == NULL) goto finish;
+    if (authorization != NULL && authorization[0] != '\0') {
+        struct curl_slist *next = curl_slist_append(headers, authorization);
+        if (next == NULL) goto finish;
+        headers = next;
+    }
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_READFUNCTION, file_read);
+    curl_easy_setopt(curl, CURLOPT_READDATA, &upload);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)source_stat->st_size);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, file_write);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &output);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, transform_header_write);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, result);
+    if (no_redirect) curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    code = curl_easy_perform(curl);
+    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result->status);
+    uploaded = code == CURLE_OK && result->status >= 200 && result->status < 300;
+    if (!uploaded) {
+        set_last_error(code, result->status, NULL, false);
+        record_http_failure(url, code, result->status, NULL, false);
+    }
+
+finish:
+    if (headers != NULL) curl_slist_free_all(headers);
+    if (curl != NULL) curl_easy_cleanup(curl);
+    if (upload.fd >= 0) sceIoClose(upload.fd);
+    if (output.fd >= 0) sceIoClose(output.fd);
+    if (!uploaded) (void)sceIoRemove(destination);
+    return uploaded;
+}
+
 static bool transform_image(const char *source_url, const char *bearer_token,
-                             const char *service_url, const char *destination, bool background) {
+                              const char *service_url, const char *destination, bool background) {
     CURL *curl = NULL;
     struct curl_slist *headers = NULL;
     LimitedDownloadFile source = {-1, 0, VP_COVER_SOURCE_LIMIT, false};
-    DownloadFile output = {-1};
-    DownloadFile upload = {-1};
     SceIoStat source_stat;
     CURLcode result;
     long status = 0;
     bool downloaded = false;
+    bool official_auth = false;
     char authorization[VP_TEXT + 32];
+    char session_token[VP_IMAGE_SESSION_TOKEN_MAX];
     char endpoint[VP_URL + 64];
     const char *separator;
+    int attempt;
     if (source_url == NULL || service_url == NULL || destination == NULL ||
         !valid_bearer_token(bearer_token) ||
         !vp_url_escape(source_url, transfer_url, sizeof(transfer_url))) return false;
@@ -1267,48 +1355,50 @@ static bool transform_image(const char *source_url, const char *bearer_token,
 
     separator = strchr(service_url, '?') != NULL ? "&" : "?";
     if (snprintf(endpoint, sizeof(endpoint), "%s%swidth=%u&height=%u&mode=%s", service_url, separator,
-                 background?480U:256U,background?272U:320U,background?"cover":"contain") >=
-            (int)sizeof(endpoint) ||
-        !vp_url_escape(endpoint, transform_url, sizeof(transform_url)) ||
-        sceIoGetstat(VP_COVER_SOURCE_PATH, &source_stat) < 0 || source_stat.st_size <= 0 ||
-        source_stat.st_size > VP_COVER_SOURCE_LIMIT || !make_parent_dirs(destination)) goto finish;
-    upload.fd = sceIoOpen(VP_COVER_SOURCE_PATH, SCE_O_RDONLY, 0);
-    output.fd = sceIoOpen(destination, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
-    if (upload.fd < 0 || output.fd < 0) goto finish;
-    curl = curl_easy_init();
-    if (curl == NULL) goto finish;
-    headers = curl_slist_append(headers, "Content-Type: application/octet-stream");
-    if (headers == NULL) goto finish;
-    curl_easy_setopt(curl, CURLOPT_URL, transform_url);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_READFUNCTION, file_read);
-    curl_easy_setopt(curl, CURLOPT_READDATA, &upload);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)source_stat.st_size);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, file_write);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &output);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    result = curl_easy_perform(curl);
-    (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-    downloaded = result == CURLE_OK && status >= 200 && status < 300;
-    if (!downloaded) {
-        set_last_error(result, status, NULL, false);
-        record_http_failure(transform_url, result, status, NULL, false);
+                  background?480U:256U,background?272U:320U,background?"cover":"contain") >=
+             (int)sizeof(endpoint) ||
+         !vp_url_escape(endpoint, transform_url, sizeof(transform_url)) ||
+         sceIoGetstat(VP_COVER_SOURCE_PATH, &source_stat) < 0 || source_stat.st_size <= 0 ||
+         source_stat.st_size > VP_COVER_SOURCE_LIMIT || !make_parent_dirs(destination)) goto finish;
+
+    authorization[0] = '\0';
+    official_auth = vp_image_session_active();
+    if (official_auth) {
+        /* The RomM bearer token is only for the source download; official requests
+         * carry the session token instead and never fall back to anonymous access. */
+        if (!vp_image_session_ensure(service_url) ||
+            !vp_image_session_token(session_token, sizeof(session_token))) goto finish;
+        (void)snprintf(authorization, sizeof(authorization), "Authorization: Bearer %s",
+                       session_token);
+    } else if (bearer_token != NULL && bearer_token[0] != '\0') {
+        (void)snprintf(authorization, sizeof(authorization), "Authorization: Bearer %s", bearer_token);
+    }
+
+    for (attempt = 0; attempt < 2; attempt++) {
+        TransformUploadResult upload_result;
+        downloaded = post_transform(transform_url, &source_stat, authorization,
+                                    destination, official_auth, &upload_result);
+        if (downloaded || !official_auth || attempt != 0) break;
+        if (upload_result.status == 401) {
+            vp_image_session_invalidate();
+            if (!vp_image_session_ensure(service_url) ||
+                !vp_image_session_token(session_token, sizeof(session_token))) break;
+            (void)snprintf(authorization, sizeof(authorization), "Authorization: Bearer %s",
+                           session_token);
+        } else if (upload_result.status == 429) {
+            (void)vp_image_session_wait_retry_after(upload_result.retry_after);
+        } else break;
     }
 
 finish:
     if (headers != NULL) curl_slist_free_all(headers);
     if (curl != NULL) curl_easy_cleanup(curl);
     if (source.fd >= 0) sceIoClose(source.fd);
-    if (upload.fd >= 0) sceIoClose(upload.fd);
-    if (output.fd >= 0) sceIoClose(output.fd);
     (void)sceIoRemove(VP_COVER_SOURCE_PATH);
     if (!downloaded) (void)sceIoRemove(destination);
     return downloaded;
 }
+
 
 bool vp_vita_transform_cover(const char *source_url,const char *bearer_token,
                              const char *service_url,const char *destination,void *context) {
