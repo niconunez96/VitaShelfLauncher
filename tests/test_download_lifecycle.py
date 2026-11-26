@@ -209,5 +209,85 @@ int main(int argc, char **argv) {
         self.assertEqual(self.poll(5), ([1, 0, 0, 0], ""))
 
 
+class VitaDownloadKeepAwakeTests(unittest.TestCase):
+    """Keep-awake must follow an active download/install, not idle browsing."""
+
+    @classmethod
+    def setUpClass(cls):
+        if "static bool download_job_in_progress(void)" not in MAIN:
+            raise AssertionError("missing static bool download_job_in_progress(void)")
+        scratch = tempfile.TemporaryDirectory(prefix="vp-download-keep-awake-")
+        cls.addClassCleanup(scratch.cleanup)
+        cls.probe = pathlib.Path(scratch.name) / "keep_awake"
+        prefix = r'''
+#include <assert.h>
+#include <pthread.h>
+#include <stdbool.h>
+#include <stdio.h>
+typedef enum {
+    VP_JOB_NONE, VP_JOB_SYNC_PROVIDERS, VP_JOB_PAIR_AND_SYNC, VP_JOB_VALIDATE_ROMM,
+    VP_JOB_DOWNLOAD_ROM, VP_JOB_INSTALL_HOMEBREW, VP_JOB_SYNC_COVERS, VP_JOB_SCAN_LOCAL,
+    VP_JOB_CHECK_STEAMGRID, VP_JOB_CHECK_IMAGES, VP_JOB_SYNC_STEAMGRID
+} VpProbeJobKind;
+static struct {
+    pthread_mutex_t mutex;
+    bool active;
+    bool cancel_requested;
+    bool pause_requested;
+    VpProbeJobKind kind;
+} background_job = { .mutex = PTHREAD_MUTEX_INITIALIZER };
+'''
+        suffix = r'''
+int main(void) {
+    background_job.active = false;
+    background_job.kind = VP_JOB_DOWNLOAD_ROM;
+    assert(!download_job_in_progress());
+    background_job.active = true;
+    background_job.kind = VP_JOB_SCAN_LOCAL;
+    assert(!download_job_in_progress());
+    background_job.kind = VP_JOB_DOWNLOAD_ROM;
+    assert(download_job_in_progress());
+    background_job.pause_requested = true;
+    assert(!download_job_in_progress());
+    background_job.pause_requested = false;
+    background_job.cancel_requested = true;
+    assert(!download_job_in_progress());
+    background_job.cancel_requested = false;
+    background_job.kind = VP_JOB_INSTALL_HOMEBREW;
+    assert(download_job_in_progress());
+    background_job.active = false;
+    assert(!download_job_in_progress());
+    puts("Gated download keep-awake predicate: PASS");
+    return 0;
+}
+'''
+        subprocess.run(
+            ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-pthread",
+             "-x", "c", "-", "-o", str(cls.probe)],
+            input=prefix + function_source(MAIN, "static bool download_job_in_progress") + suffix,
+            text=True, capture_output=True, check=True,
+        )
+
+    def test_gated_tick_contract(self):
+        predicate = function_source(MAIN, "static bool download_job_in_progress")
+        self.assertIn("VP_JOB_DOWNLOAD_ROM", predicate)
+        self.assertIn("VP_JOB_INSTALL_HOMEBREW", predicate)
+        self.assertIn("!background_job.cancel_requested", predicate)
+        self.assertIn("!background_job.pause_requested", predicate)
+        loop = MAIN[MAIN.index("int main(void) {"):]
+        loop = loop[:loop.index("if (settings_ime_active)")]
+        self.assertLess(loop.index("download_job_in_progress()"), loop.index("sceKernelPowerTick"))
+        self.assertIn("SCE_KERNEL_POWER_TICK_DEFAULT", loop)
+        self.assertIn("SceProcessmgr_stub", (ROOT / "CMakeLists.txt").read_text())
+        self.assertNotIn("sceShellUtilLock", MAIN)
+
+    def test_predicate_follows_active_download_and_install_only(self):
+        result = subprocess.run(
+            [str(self.probe)], text=True, capture_output=True, timeout=5,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+
+
 if __name__ == "__main__":
     unittest.main()

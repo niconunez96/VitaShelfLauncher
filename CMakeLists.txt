@@ -36,7 +36,7 @@ if(DEFINED ENV{VITASDK})
   target_link_libraries(vitashelflauncher vitashelflauncher_core vita2d freetype png jpeg curl zip z zstd bz2 lzma ssl crypto m pthread
     SceCtrl_stub SceTouch_stub SceDisplay_stub SceGxm_stub SceLibKernel_stub SceAppMgr_stub SceCommonDialog_stub SceIme_stub
     ScePgf_stub SceIofilemgr_stub SceNet_stub SceNetCtl_stub SceSsl_stub SceSysmodule_stub SceAudio_stub
-    ScePromoterUtil_stub_weak SceRtc_stub ScePower_stub)
+    ScePromoterUtil_stub_weak SceRtc_stub ScePower_stub SceProcessmgr_stub)
   configure_file("$ENV{VITASDK}/arm-vita-eabi/ssl/openssl.cnf"
     "${CMAKE_CURRENT_BINARY_DIR}/openssl.cnf" COPYONLY)
   vita_create_self(eboot.bin vitashelflauncher UNSAFE)

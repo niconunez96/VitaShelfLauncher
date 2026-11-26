@@ -321,6 +321,19 @@ static VpUiSyncStatus sync_status_snapshot(const VpJobStatusSnapshot *job, int i
     return status;
 }
 static VpDownloadQueue download_queue;
+/* Only real transfer/install work may cancel the Vita idle timers; browsing keeps
+ * its normal dimming and suspend behavior. A requested pause or cancel ends the
+ * keep-awake window immediately, even while the worker is unwinding. */
+static bool download_job_in_progress(void) {
+    bool active;
+    pthread_mutex_lock(&background_job.mutex);
+    active = background_job.active &&
+             (background_job.kind == VP_JOB_DOWNLOAD_ROM ||
+              background_job.kind == VP_JOB_INSTALL_HOMEBREW) &&
+             !background_job.cancel_requested && !background_job.pause_requested;
+    pthread_mutex_unlock(&background_job.mutex);
+    return active;
+}
 /* Three grid rows can be visible during a drag; retain the selected cover too. */
 #define VP_COVER_SLOTS (VP_UI_GRID_WINDOW + 1)
 static VpPlatformGroup platform_groups[VP_MAX_LIBRARY_GROUPS];
@@ -2964,6 +2977,8 @@ int main(void) {
     for (;;) {
         unsigned int pressed;
         VpUiFrame frame;
+        if (download_job_in_progress())
+            (void)sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
         if (settings_ime_active) {
             (void)vita2d_common_dialog_update();
             settings_finish_ime(&app);
