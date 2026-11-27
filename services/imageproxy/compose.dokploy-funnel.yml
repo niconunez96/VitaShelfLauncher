@@ -1,6 +1,27 @@
 # Standalone alternative to compose.dokploy.yml; do not merge the two files.
-# Requires a loopback-only "funnel" entrypoint on Dokploy's Traefik instance.
+# Requires a "funnel" entrypoint on bridge-networked Dokploy Traefik (:8091).
+# The relay publishes that entrypoint on host loopback; do not publish Traefik's port.
 services:
+  funnel-relay:
+    image: alpine/socat:1.8.0.3@sha256:beb4a68d9e4fe6b0f21ea774a0fde6c31f580dde6368939ed70100c5385b015e
+    restart: unless-stopped
+    user: "65534:65534"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    command:
+      - "TCP4-LISTEN:8091,bind=0.0.0.0,reuseaddr,fork,max-children=64"
+      - "TCP4-CONNECT:dokploy-traefik:8091,connect-timeout=5"
+    ports:
+      - "127.0.0.1:8091:8091/tcp"
+    networks:
+      - dokploy-network
+    labels:
+      - "traefik.enable=false"
+
   imageproxy:
     build:
       context: .
