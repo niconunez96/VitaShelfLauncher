@@ -89,6 +89,7 @@ class LegacyReleaseVersionTests(unittest.TestCase):
             ("fix(api)!: remove old endpoint", "v1.0.0"),
             ("feat(api): replace endpoint\n\nBREAKING CHANGE: old endpoint removed", "v1.0.0"),
             ("perf: replace cache\n\nBREAKING-CHANGE: incompatible layout", "v1.0.0"),
+            ("feat: document text\n\nThis mentions BREAKING CHANGE: but is not a footer.", "v0.15.0"),
         ):
             with self.subTest(message=message):
                 version, validation = self.run_release_tools([message])
@@ -129,7 +130,11 @@ class LegacyReleaseVersionTests(unittest.TestCase):
                 self.assertEqual(0, validation.returncode, validation.stderr)
 
     def test_unknown_or_malformed_subjects_are_not_silently_ignored(self) -> None:
-        for message in ("add an endpoint", "feat: ", "chore: unrelated task"):
+        for message in (
+            "add an endpoint", "feat: ", "chore: unrelated task", "Feat: add view",
+            "feat(UI): add view", "feat(): add view", "feat:  add view",
+            "fix(api)!!: remove endpoint", "feat add view",
+        ):
             with self.subTest(message=message):
                 version, validation = self.run_release_tools([message])
                 self.assertNotEqual(0, version.returncode)
