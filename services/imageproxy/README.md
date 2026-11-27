@@ -100,6 +100,123 @@ Set VitaShelf Launcher's `image_proxy_url` to the public endpoint, including its
 image_proxy_url=https://images.example.com/image
 ```
 
+### Free stable hostname with Tailscale Funnel
+
+For Tailscale installed **on the Dokploy server host**, use
+`services/imageproxy/compose.dokploy-funnel.yml` **instead of**
+`compose.dokploy.yml`. This is a standalone alternative, not a Compose override.
+It keeps imageproxy off host ports and routes all public requests through Traefik's
+rate limiter. The original domain/Let's Encrypt deployment remains unchanged.
+
+```text
+Internet -> Funnel HTTPS -> host loopback:8091 -> Traefik -> imageproxy:8090
+```
+
+#### 1. Prepare Traefik's private entrypoint
+
+These are **manual server-side changes** to Dokploy's Traefik deployment, which is
+not managed by this repository. Back up its configuration and preserve its existing
+entrypoints, ports, Docker provider, and connection to `dokploy-network`.
+
+If Traefik uses a **bridge network**, add this entry to its static configuration:
+
+```yaml
+entryPoints:
+  funnel:
+    address: ":8091"
+```
+
+Add this port mapping to the **Traefik container**, not imageproxy:
+
+```yaml
+ports:
+  - "127.0.0.1:8091:8091"
+```
+
+If Traefik uses **host networking**, do not add a Docker port mapping. Instead bind
+the entrypoint directly to loopback:
+
+```yaml
+entryPoints:
+  funnel:
+    address: "127.0.0.1:8091"
+```
+
+Restart Traefik after changing its static configuration. Do not enable TLS,
+HTTP-to-HTTPS redirects, or forwarding to the dashboard on this entrypoint.
+Funnel supplies public HTTPS; the unencrypted hop is local to this server.
+Keep `8091` blocked from external interfaces, including IPv6, and do not enable
+`forwardedHeaders.insecure` or blindly trust client-supplied forwarded headers.
+
+#### 2. Deploy the Funnel variant
+
+Enable Tailscale Funnel for this device in your tailnet and obtain its full DNS
+name from `tailscale status --json` (`Self.DNSName`, without the trailing dot).
+In the existing Dokploy Compose application, select the Funnel compose file, keep
+the build context as `services/imageproxy`, and set:
+
+```text
+IMAGE_PROXY_FUNNEL_HOST=image-server.your-tailnet.ts.net
+IMAGE_PROXY_KEY=<existing secret>
+IMAGE_PROXY_KEY_ID=<existing public identifier>
+```
+
+Use the real hostname without `https://` or a path. This variant requires both auth
+variables to be nonempty: it must not publish the unauthenticated local mode.
+`IMAGE_PROXY_DOMAIN` is not needed, and no Let's Encrypt resolver is used.
+Replace the existing deployment rather than running both variants simultaneously;
+they deliberately reuse Traefik service and middleware names.
+
+Redeploy, then start Funnel **on the server host**:
+
+```sh
+sudo tailscale funnel --bg 8091
+tailscale funnel status
+```
+
+Follow any Tailscale approval prompts. The background configuration resumes when
+Tailscale starts after a reboot. Do not point Funnel at imageproxy's `8090` port or
+at a general-purpose Traefik/dashboard entrypoint.
+
+#### 3. Verify before using the public endpoint
+
+```sh
+# On the server: the expected host reaches the private Traefik router.
+curl --fail -H 'Host: image-server.your-tailnet.ts.net' http://127.0.0.1:8091/health
+# An unrelated host must not reach imageproxy (normally Traefik returns 404).
+curl -i -H 'Host: unrelated.invalid' http://127.0.0.1:8091/health
+# From a separate internet connection: expect 200 and "ok".
+curl --fail https://image-server.your-tailnet.ts.net/health
+# Expect 401 without an application session token.
+curl -i -X POST 'https://image-server.your-tailnet.ts.net/image?width=1&height=1'
+```
+
+Also verify from another machine that direct access to the server's ports `8090`
+and `8091` fails. Confirm Traefik emits `429` when its configured request limit is
+exceeded, using a controlled test before production traffic. The reverse-proxy
+hops can place visitors in a shared IP bucket; the configured 300/minute limit
+must not be assumed to be independent for each internet client. Application
+per-installation quotas still apply. Funnel itself also has bandwidth limits.
+
+Set the launcher endpoint to
+`https://image-server.your-tailnet.ts.net/image`. Keep the device name and tailnet
+DNS name unchanged to retain the hostname. No browser/email authentication gate
+is needed: the launcher uses the service's existing challenge/session protocol.
+
+To stop public sharing, run `sudo tailscale funnel off`. To revert the deployment,
+select `compose.dokploy.yml` again with a valid `IMAGE_PROXY_DOMAIN`, then remove
+the private Traefik entrypoint and its loopback mapping when no longer needed.
+
+Validate both Compose variants locally without starting containers:
+
+```sh
+python3 tests/test_imageproxy_deployment.py
+```
+
+This check requires Docker Compose v2; it does not require a Docker daemon.
+Live Funnel reachability, host firewall rules, and Traefik routing must be checked
+on the deployment server using the steps above.
+
 ## Request
 
 ```text
