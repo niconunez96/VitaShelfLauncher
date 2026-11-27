@@ -1,6 +1,7 @@
 #include "image_service.h"
 
 #include "image_service_auth.h"
+#include "tls_diagnostics.h"
 #include "vita_backend.h"
 #include "vitashelflauncher.h"
 
@@ -38,6 +39,8 @@ static char configured_endpoint[VP_URL];
 static char session_token[VP_IMAGE_SESSION_TOKEN_MAX];
 static unsigned long long token_expiry_us;
 static bool auth_enabled;
+static bool session_tls_debug;
+static bool session_tls12;
 
 static void clear_token_locked(void) {
     session_token[0] = '\0';
@@ -55,7 +58,7 @@ static bool ensure_installation_id_locked(void) {
     return vp_image_auth_format_install_id(bytes, installation_id, sizeof(installation_id));
 }
 
-bool vp_image_session_configure(const char *configured_url) {
+bool vp_image_session_configure(const char *configured_url, bool tls_debug, bool tls12) {
     char endpoint[VP_URL];
     bool changed;
     bool active;
@@ -64,8 +67,10 @@ bool vp_image_session_configure(const char *configured_url) {
     else endpoint[0] = '\0';
     active = vp_image_auth_active(configured_url);
     pthread_mutex_lock(&session_mutex);
-    changed = strcmp(endpoint, configured_endpoint) != 0;
+    changed = strcmp(endpoint, configured_endpoint) != 0 || session_tls12 != tls12;
     auth_enabled = active;
+    session_tls_debug = tls_debug;
+    session_tls12 = tls12;
     if (changed) {
         clear_token_locked();
         (void)snprintf(configured_endpoint, sizeof(configured_endpoint), "%s", endpoint);
@@ -103,6 +108,8 @@ void vp_image_session_reset(void) {
     clear_token_locked();
     configured_endpoint[0] = '\0';
     auth_enabled = false;
+    session_tls_debug = false;
+    session_tls12 = false;
     pthread_mutex_unlock(&session_mutex);
 }
 
@@ -158,20 +165,32 @@ static size_t auth_header_write(char *data, size_t size, size_t count, void *con
     return bytes;
 }
 
-static bool post_json(const char *url, const char *payload, ImageAuthResponse *response) {
+static bool post_json(const char *url, const char *payload, ImageAuthResponse *response,
+                       VpImageLogStage stage, bool raw_text, bool tls12_only) {
     CURL *curl;
     struct curl_slist *headers = NULL;
     CURLcode result;
+    char error_detail[CURL_ERROR_SIZE] = {0};
+    CURLcode errorbuffer_result;
+    CURLcode trace_result;
+    CURLcode tls_result;
+    int rng_ready;
+    VpTlsTrace trace = { raw_text, false };
     if (url == NULL || payload == NULL || response == NULL) return false;
     memset(response, 0, sizeof(*response));
     curl = curl_easy_init();
-    if (curl == NULL) return false;
+    if (curl == NULL) {
+        vp_vita_log_image_event(stage, CURLE_FAILED_INIT, 0, false);
+        return false;
+    }
     headers = curl_slist_append(headers, "Content-Type: application/json");
     if (headers == NULL) {
+        vp_vita_log_image_event(stage, CURLE_OUT_OF_MEMORY, 0, false);
         curl_easy_cleanup(curl);
         return false;
     }
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    errorbuffer_result = curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, error_detail);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
@@ -185,8 +204,18 @@ static bool post_json(const char *url, const char *payload, ImageAuthResponse *r
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    result = curl_easy_perform(curl);
+    trace_result = vp_vita_enable_tls_trace(curl, &trace);
+    tls_result = vp_vita_configure_debug_tls_version(curl, tls12_only);
+    rng_ready = RAND_status();
+    result = tls_result == CURLE_OK ? curl_easy_perform(curl) : tls_result;
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response->status);
+    vp_vita_log_image_event(stage, result, response->status, response->truncated);
+    if (result != CURLE_OK) {
+        long socket_error = 0;
+        CURLcode info_result = curl_easy_getinfo(curl, CURLINFO_OS_ERRNO, &socket_error);
+        vp_vita_log_tls_details(error_detail, rng_ready, (int)errorbuffer_result);
+        vp_vita_log_tls_transport(socket_error, (int)info_result, (int)trace_result);
+    }
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     return result == CURLE_OK && !response->truncated && response->status > 0;
@@ -327,6 +356,7 @@ bool vp_image_session_ensure(const char *service_url) {
     if (!auth_enabled) goto finish;
     if (!vp_image_auth_origins_match(service_url, configured_endpoint)) goto finish;
     if (token_valid_locked()) {
+        vp_vita_log_image_event(VP_IMAGE_LOG_AUTH_CACHED, CURLE_OK, 0, false);
         success = true;
         goto finish;
     }
@@ -344,7 +374,8 @@ bool vp_image_session_ensure(const char *service_url) {
     for (attempt = 0; attempt < 2; attempt++) {
         ImageAuthResponse challenge_response;
         ImageAuthResponse session_response;
-        if (!post_json(challenge_url, "{}", &challenge_response)) break;
+        if (!post_json(challenge_url, "{}", &challenge_response, VP_IMAGE_LOG_CHALLENGE,
+                       session_tls_debug, session_tls12)) break;
         if (challenge_response.status == 429) {
             (void)vp_image_session_wait_retry_after(challenge_response.retry_after);
             continue;
@@ -364,7 +395,8 @@ bool vp_image_session_ensure(const char *service_url) {
                      "\"challenge\":\"%s\",\"proof\":\"%s\"}",
                      vp_image_auth_key_id(), install, challenge, proof) >= (int)sizeof(payload))
             break;
-        if (!post_json(session_url, payload, &session_response)) break;
+        if (!post_json(session_url, payload, &session_response, VP_IMAGE_LOG_SESSION,
+                       session_tls_debug, session_tls12)) break;
         if (session_response.status == 429) {
             (void)vp_image_session_wait_retry_after(session_response.retry_after);
             continue;
@@ -386,6 +418,8 @@ bool vp_image_session_ensure(const char *service_url) {
 
 finish:
     pthread_mutex_unlock(&session_mutex);
+    vp_vita_log_image_event(success ? VP_IMAGE_LOG_AUTH_OK : VP_IMAGE_LOG_AUTH_FAILED,
+                            CURLE_OK, 0, false);
     if (!success) vp_vita_set_error("No se pudo iniciar sesión con el servicio de imágenes");
     return success;
 }

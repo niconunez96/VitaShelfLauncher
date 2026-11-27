@@ -1,7 +1,10 @@
 #include "vita_backend.h"
 #include "image_service.h"
+#include "tls_diagnostics.h"
 
 #include <curl/curl.h>
+#include <openssl/err.h>
+#include <openssl/rand.h>
 #include <psp2/appmgr.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
@@ -156,6 +159,210 @@ static void record_http_failure(const char *url, CURLcode result, long status, c
 
 static bool valid_bearer_token(const char *token) {
     return token == NULL || (strchr(token, '\r') == NULL && strchr(token, '\n') == NULL);
+}
+
+void vp_vita_log_image_event(VpImageLogStage stage, int curl_code, long status, bool truncated) {
+    static const char *const stages[] = {
+        "service-http", "health-start", "health-ok", "health-failed",
+        "challenge", "session", "auth-ok", "auth-failed", "auth-cached"
+    };
+    FILE *log;
+    if ((unsigned)stage >= sizeof(stages) / sizeof(stages[0])) return;
+    (void)sceIoMkdir("ux0:data", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
+    log = fopen("ux0:data/vitashelflauncher/network.log", "a");
+    if (log == NULL) return;
+    /* One record per write; omit all remote-controlled text and authentication data. */
+    if (stage == VP_IMAGE_LOG_SERVICE_HTTP || stage == VP_IMAGE_LOG_CHALLENGE ||
+        stage == VP_IMAGE_LOG_SESSION) {
+        (void)fprintf(log, "event=image-service stage=%s curl=%d (%s) http=%ld truncated=%d\n",
+                      stages[stage], curl_code, curl_easy_strerror((CURLcode)curl_code),
+                      status, truncated ? 1 : 0);
+    } else {
+        (void)fprintf(log, "event=image-service stage=%s\n", stages[stage]);
+    }
+    fclose(log);
+}
+
+static const char *tls_error_reason(const char *detail) {
+    static const char *const reasons[] = {
+        "SSL_ERROR_SYSCALL", "SSL_ERROR_SSL", "unsupported protocol",
+        "no protocols available", "no shared cipher", "no ciphers available",
+        "wrong version number", "alert protocol version", "alert handshake failure",
+        "alert internal error", "certificate verify failed", "unexpected eof",
+        "legacy sigalg disallowed", "failed setting cipher list",
+        "unable to get local issuer certificate", "Insufficient randomness",
+        "Error determining ALPN", "Error setting ALPN", "Failed set SNI",
+        "TLS connect error"
+    };
+    size_t index;
+    if (detail != NULL) {
+        for (index = 0; index < sizeof(reasons) / sizeof(reasons[0]); index++) {
+            if (strstr(detail, reasons[index]) != NULL) return reasons[index];
+        }
+    }
+    return "unavailable";
+}
+
+void vp_vita_log_tls_details(const char *detail, int rng_ready, int errorbuffer_result) {
+    const curl_version_info_data *versions = curl_version_info(CURLVERSION_NOW);
+    const char *cursor = detail;
+    const char *reason;
+    unsigned long code = 0;
+    bool code_present = false;
+    FILE *log;
+    /* The error buffer may contain hosts or credentials. Decode only an exact
+     * OpenSSL error code and look its reason up in the local library. */
+    while (cursor != NULL && (cursor = strstr(cursor, "error:")) != NULL) {
+        cursor += 6;
+        if (strspn(cursor, "0123456789abcdefABCDEF") == 8U && cursor[8] == ':') {
+            code = strtoul(cursor, NULL, 16);
+            code_present = true;
+            break;
+        }
+    }
+    reason = code != 0 ? ERR_reason_error_string(code) : NULL;
+    (void)sceIoMkdir("ux0:data", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
+    log = fopen("ux0:data/vitashelflauncher/network.log", "a");
+    if (log == NULL) return;
+    (void)fprintf(log, "event=image-service curl_version=%.96s ssl_version=%.96s "
+                  "tls_detail=%s openssl_error=%08lx openssl_error_present=%d reason=%.128s "
+                  "errorbuffer_nonempty=%d errorbuffer_result=%d rng_ready=%d\n",
+                  versions != NULL && versions->version != NULL ? versions->version : "unavailable",
+                  versions != NULL && versions->ssl_version != NULL ? versions->ssl_version : "unavailable",
+                  tls_error_reason(detail), code, code_present ? 1 : 0,
+                  reason != NULL ? reason : "unavailable", detail != NULL && *detail != '\0' ? 1 : 0,
+                  errorbuffer_result, rng_ready);
+    fclose(log);
+}
+
+static void record_raw_tls_text(const char *data, size_t size) {
+    FILE *log;
+    size_t retained;
+    if (data == NULL || size == 0) return;
+    /* The caller enforces the config opt-in. Text may contain private URLs. */
+    log = fopen("ux0:data/vitashelflauncher/tls-debug.log", "ab");
+    if (log == NULL) return;
+    retained = size < 4096U ? size : 4096U;
+    (void)fprintf(log, "[curl-text bytes=%lu retained=%lu]\n",
+                  (unsigned long)size, (unsigned long)retained);
+    (void)fwrite(data, 1, retained, log);
+    (void)fprintf(log, "\n%s", retained < size ? "[truncated]\n" : "");
+    fclose(log);
+}
+
+static bool record_tls_clienthello(const unsigned char *data, size_t size) {
+    size_t offset, length, index;
+    FILE *log;
+    /* OpenSSL's message callback supplies a handshake message, not a TLS record.
+     * Require a complete bounded ClientHello, never arbitrary TLS ciphertext. */
+    if (data == NULL || size < 45U || size > 16384U || data[0] != 1U ||
+        data[4] != 3U || data[5] > 3U) return false;
+    length = ((size_t)data[1] << 16) | ((size_t)data[2] << 8) | data[3];
+    if (length != size - 4U || data[38] > 32U) return false;
+    offset = 39U + data[38];
+    if (offset + 2U > size) return false;
+    length = ((size_t)data[offset] << 8) | data[offset + 1U];
+    offset += 2U;
+    if (length < 2U || length % 2U != 0 || length > size - offset) return false;
+    offset += length;
+    if (offset == size) return false;
+    length = data[offset++];
+    if (length == 0 || length > size - offset) return false;
+    offset += length;
+    if (offset < size) {
+        if (size - offset < 2U) return false;
+        length = ((size_t)data[offset] << 8) | data[offset + 1U];
+        offset += 2U;
+        if (length != size - offset) return false;
+        while (offset < size) {
+            if (size - offset < 4U) return false;
+            length = ((size_t)data[offset + 2U] << 8) | data[offset + 3U];
+            offset += 4U;
+            if (length > size - offset) return false;
+            offset += length;
+        }
+    }
+    log = fopen("ux0:data/vitashelflauncher/tls-clienthello.log", "a");
+    if (log == NULL) return false;
+    (void)fprintf(log, "[tls-clienthello bytes=%lu]\n", (unsigned long)size);
+    for (index = 0; index < size; index++) {
+        (void)fprintf(log, "%02x%c", (unsigned)data[index],
+                      (index + 1U) % 16U == 0 || index + 1U == size ? '\n' : ' ');
+    }
+    fclose(log);
+    return true;
+}
+
+static int tls_debug(CURL *curl, curl_infotype type, char *data, size_t size, void *context) {
+    static const char *const labels[] = {
+        "SSL_ERROR_SYSCALL", "SSL_ERROR_ZERO_RETURN", "SSL_ERROR_SSL"
+    };
+    char line[256];
+    size_t length, index;
+    FILE *log;
+    VpTlsTrace *trace = context;
+    (void)curl;
+    if (type == CURLINFO_SSL_DATA_OUT) {
+        if (trace != NULL && trace->raw_text && !trace->clienthello_captured)
+            trace->clienthello_captured = record_tls_clienthello((const unsigned char *)data, size);
+        return 0;
+    }
+    /* Debug callbacks receive decrypted credentials and bodies too. Drop those
+     * types before either the filtered or opt-in raw-text logger sees data. */
+    if (type != CURLINFO_TEXT || data == NULL || size == 0) return 0;
+    if (trace != NULL && trace->raw_text) record_raw_tls_text(data, size);
+    length = size < sizeof(line) - 1U ? size : sizeof(line) - 1U;
+    memcpy(line, data, length);
+    line[length] = '\0';
+    if (strstr(line, "OpenSSL SSL_connect:") == NULL) return 0;
+    for (index = 0; index < sizeof(labels) / sizeof(labels[0]); index++) {
+        if (strstr(line, labels[index]) == NULL) continue;
+        (void)sceIoMkdir("ux0:data", 0777);
+        (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
+        log = fopen("ux0:data/vitashelflauncher/network.log", "a");
+        if (log != NULL) {
+            (void)fprintf(log, "event=image-service tls_trace=%s\n", labels[index]);
+            fclose(log);
+        }
+        break;
+    }
+    return 0;
+}
+
+CURLcode vp_vita_configure_debug_tls_version(CURL *curl, bool tls12_only) {
+    FILE *log;
+    CURLcode result;
+    if (!tls12_only) return CURLE_OK;
+    /* A minimum alone still permits TLS 1.3. This experiment fixes both bounds. */
+    result = curl_easy_setopt(curl, CURLOPT_SSLVERSION,
+                             (long)(CURL_SSLVERSION_TLSv1_2 | CURL_SSLVERSION_MAX_TLSv1_2));
+    log = fopen("ux0:data/vitashelflauncher/network.log", "a");
+    if (log != NULL) {
+        (void)fprintf(log, "event=image-service tls_policy=tls1.2-only setup_result=%d\n", (int)result);
+        fclose(log);
+    }
+    return result;
+}
+
+CURLcode vp_vita_enable_tls_trace(CURL *curl, VpTlsTrace *trace) {
+    CURLcode result = curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, tls_debug);
+    if (result == CURLE_OK) result = curl_easy_setopt(curl, CURLOPT_DEBUGDATA, (void *)trace);
+    /* Without the callback, VERBOSE would expose raw headers and credentials. */
+    if (result == CURLE_OK) result = curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+    return result;
+}
+
+void vp_vita_log_tls_transport(long socket_error, int info_result, int trace_result) {
+    FILE *log;
+    (void)sceIoMkdir("ux0:data", 0777);
+    (void)sceIoMkdir("ux0:data/vitashelflauncher", 0777);
+    log = fopen("ux0:data/vitashelflauncher/network.log", "a");
+    if (log == NULL) return;
+    (void)fprintf(log, "event=image-service os_errno=%ld os_errno_result=%d trace_result=%d\n",
+                  socket_error, info_result, trace_result);
+    fclose(log);
 }
 
 static bool valid_pair_code(const char *code) {
@@ -1038,11 +1245,18 @@ static bool promote_vpk(const char *vpk_path) {
 }
 
 static long probe_http(const char *url, const char *bearer_token,
-                        char *response, size_t response_capacity, bool diagnostics) {
+                        char *response, size_t response_capacity, bool diagnostics,
+                        const VpRommConfig *config) {
     CURL *curl;
     struct curl_slist *headers = NULL;
     ResponseBuffer buffer;
     char authorization[VP_TEXT + 32];
+    char error_detail[CURL_ERROR_SIZE] = {0};
+    CURLcode errorbuffer_result;
+    CURLcode trace_result = CURLE_OK;
+    CURLcode tls_result = CURLE_OK;
+    int rng_ready = -1;
+    VpTlsTrace trace = { config != NULL && config->tls_debug, false };
     CURLcode result;
     long status = 0;
     if (url == NULL || response == NULL || response_capacity == 0 || !valid_bearer_token(bearer_token)) return false;
@@ -1052,16 +1266,21 @@ static long probe_http(const char *url, const char *bearer_token,
     buffer.used = 0;
     buffer.truncated = false;
     curl = curl_easy_init();
-    if (curl == NULL) return false;
+    if (curl == NULL) {
+        if (!diagnostics) vp_vita_log_image_event(VP_IMAGE_LOG_SERVICE_HTTP, CURLE_FAILED_INIT, 0, false);
+        return false;
+    }
     if (bearer_token != NULL && bearer_token[0] != '\0') {
         (void)snprintf(authorization, sizeof(authorization), "Authorization: Bearer %s", bearer_token);
         headers = curl_slist_append(headers, authorization);
         if (headers == NULL) {
+            if (!diagnostics) vp_vita_log_image_event(VP_IMAGE_LOG_SERVICE_HTTP, CURLE_OUT_OF_MEMORY, 0, false);
             curl_easy_cleanup(curl);
             return false;
         }
     }
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    errorbuffer_result = curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, error_detail);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, response_write);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
@@ -1071,10 +1290,22 @@ static long probe_http(const char *url, const char *bearer_token,
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    result = curl_easy_perform(curl);
+    if (!diagnostics) {
+        trace_result = vp_vita_enable_tls_trace(curl, &trace);
+        tls_result = vp_vita_configure_debug_tls_version(curl, config != NULL && config->tls12);
+        rng_ready = RAND_status();
+    }
+    result = tls_result == CURLE_OK ? curl_easy_perform(curl) : tls_result;
     (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
     set_last_error(result, status, diagnostics?response:NULL, buffer.truncated);
     if (diagnostics) record_http_failure(url, result, status, response, buffer.truncated);
+    else vp_vita_log_image_event(VP_IMAGE_LOG_SERVICE_HTTP, result, status, buffer.truncated);
+    if (!diagnostics && result != CURLE_OK) {
+        long socket_error = 0;
+        CURLcode info_result = curl_easy_getinfo(curl, CURLINFO_OS_ERRNO, &socket_error);
+        vp_vita_log_tls_details(error_detail, rng_ready, (int)errorbuffer_result);
+        vp_vita_log_tls_transport(socket_error, (int)info_result, (int)trace_result);
+    }
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     return result == CURLE_OK && !buffer.truncated ? status : 0;
@@ -1083,13 +1314,12 @@ static long probe_http(const char *url, const char *bearer_token,
 long vp_vita_probe_romm(const char *url, const char *bearer_token,
                         char *response, size_t capacity, void *context) {
     (void)context;
-    return probe_http(url,bearer_token,response,capacity,true);
+    return probe_http(url,bearer_token,response,capacity,true,NULL);
 }
 
 long vp_vita_probe_service(const char *url, const char *bearer_token,
                            char *response, size_t capacity, void *context) {
-    (void)context;
-    return probe_http(url,bearer_token,response,capacity,false);
+    return probe_http(url,bearer_token,response,capacity,false,context);
 }
 
 bool vp_vita_fetch(const char *url, const char *bearer_token,

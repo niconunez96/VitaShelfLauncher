@@ -8,7 +8,7 @@
 
 /* Called whenever the configured image endpoint changes. Returns true when the
  * compiled official auth mode is active for that endpoint. */
-bool vp_image_session_configure(const char *configured_url);
+bool vp_image_session_configure(const char *configured_url, bool tls_debug, bool tls12);
 bool vp_image_session_active(void);
 bool vp_image_session_installation_id(char *out, size_t capacity);
 bool vp_image_session_ensure(const char *service_url);

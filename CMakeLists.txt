@@ -46,11 +46,14 @@ if(DEFINED ENV{VITASDK})
     src/vita/ui_presentation.c
     src/vita/ui_renderer.c
     src/vita/vita_backend.c
+    src/vita/inet_pton_compat.c
     src/vita/image_service.c)
   target_include_directories(vitashelflauncher PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
   target_compile_definitions(vitashelflauncher PRIVATE VP_APP_VERSION="${VITA_VERSION}")
   # Catch large automatic buffers before they can exhaust a Vita thread stack.
   target_compile_options(vitashelflauncher PRIVATE -Werror=frame-larger-than=16384)
+  # Keep DNS names out of curl's IP-only TLS path when Vita inet_pton returns -1.
+  target_link_options(vitashelflauncher PRIVATE "LINKER:--wrap=inet_pton")
   target_link_libraries(vitashelflauncher vitashelflauncher_core vita2d freetype png jpeg curl zip z zstd bz2 lzma ssl crypto m pthread
     SceCtrl_stub SceTouch_stub SceDisplay_stub SceGxm_stub SceLibKernel_stub SceAppMgr_stub SceCommonDialog_stub SceIme_stub
     ScePgf_stub SceIofilemgr_stub SceNet_stub SceNetCtl_stub SceSsl_stub SceSysmodule_stub SceAudio_stub

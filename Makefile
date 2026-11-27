@@ -45,6 +45,8 @@ test-ui: build/test_presentation build/test_catalog_cache
 	python3 tests/test_ui_assets.py
 
 test-vita-lifecycle:
+	python3 tests/test_vita_inet_pton.py
+	python3 tests/test_image_service_logging.py
 	python3 tests/test_vita_render_lifecycle.py
 	python3 tests/test_vita_t2_concurrency_probe.py
 	python3 tests/test_vita_audio.py

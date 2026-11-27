@@ -118,11 +118,13 @@ int main(void) {
     fputs("romm_url=http://127.0.0.1:1\nromm_token=test-fixture\n"
           "image_proxy_url=http://127.0.0.1:2/image\nhomebrew_catalog=http://127.0.0.1:3/catalog\n"
            "steamgriddb_api_key=steamgrid-fixture\nactive_theme=default\nactive_view=list\nlaunch_psx=RETROVITA:pcsx_rearmed\n"
-           "launch_rom.42=RETROVITA:app0:/mame2000_libretro.self\n",file);
+             "launch_rom.42=RETROVITA:app0:/mame2000_libretro.self\n"
+             "tls_debug=1\ntls12=0\n",file);
 
     assert(!fclose(file));
     vp_launch_config_init(&launch_config);
     load_providers(&app);
+    assert(romm_config.tls_debug && !romm_config.tls12);
     assert(app.active_view==VP_VIEW_LIST); /* user view wins over the theme default */
     assert(ui_preferences.wallpaper==0 && ui_preferences.text_color==VP_UI_TEXT_COLOR_WHITE && ui_preferences.animated);
     assert(vp_ui_preferences_set(&ui_preferences,"ui_wallpaper","violet"));
@@ -154,6 +156,8 @@ int main(void) {
     saved[length]='\0';
     assert(strstr(saved,"active_view=carousel\n"));
     assert(strstr(saved,"launch_rom.42=RETROVITA:app0:/mame2000_libretro.self\n"));
+    assert(strstr(saved,"tls_debug=1\n"));
+    assert(strstr(saved,"tls12=0\n"));
     assert(strstr(saved,"ui_wallpaper=violet\n"));
     assert(strstr(saved,"ui_text_color=dark\n"));
     assert(!symlink("/dev/full",VP_CONFIG_PATH ".tmp"));
@@ -168,7 +172,30 @@ int main(void) {
     load_providers(&app);
     assert(!strcmp(romm_config.token,"test-fixture"));
     assert(app.active_view==VP_VIEW_CAROUSEL && ui_preferences.wallpaper==1 && ui_preferences.text_color==VP_UI_TEXT_COLOR_DARK);
+    assert(romm_config.tls_debug && !romm_config.tls12);
     assert(access(VP_CONFIG_PATH ".bak",F_OK)!=0);
+    file=fopen(VP_CONFIG_PATH,"w"); assert(file);
+    fputs("active_theme=default\n",file); assert(!fclose(file));
+    load_providers(&app);
+    assert(!romm_config.tls_debug && !romm_config.tls12);
+    for (int debug=0; debug<2; debug++) for (int tls12=0; tls12<2; tls12++) {
+        file=fopen(VP_CONFIG_PATH,"w"); assert(file);
+        fprintf(file,"tls_debug = %d\ntls12 = %d\n",debug,tls12); assert(!fclose(file));
+        load_providers(&app);
+        assert(romm_config.tls_debug==debug && romm_config.tls12==tls12);
+        assert(save_romm_config());
+        romm_config.tls_debug=false; romm_config.tls12=false;
+        load_providers(&app);
+        assert(romm_config.tls_debug==debug && romm_config.tls12==tls12);
+    }
+    file=fopen(VP_CONFIG_PATH,"w"); assert(file);
+    fputs("tls_debug=yes\ntls12=2\n",file); assert(!fclose(file));
+    load_providers(&app);
+    assert(!romm_config.tls_debug && !romm_config.tls12);
+    romm_config.tls_debug=true; romm_config.tls12=true;
+    assert(!remove(VP_CONFIG_PATH));
+    load_providers(&app);
+    assert(!romm_config.tls_debug && !romm_config.tls12);
     puts("View and appearance persistence, backup recovery and failed-save recovery: PASS");
 }
 '''

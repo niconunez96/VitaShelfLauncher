@@ -479,6 +479,8 @@ static void load_providers(VpApp *app) {
     char line[512];
     VpView configured_view = VP_VIEW_GRID;
     bool active_view_configured = false;
+    romm_config.tls_debug = false;
+    romm_config.tls12 = false;
     file = fopen(VP_CONFIG_PATH, "r");
     if (file == NULL) {
         FILE *backup = fopen(VP_CONFIG_PATH ".bak", "r");
@@ -504,6 +506,10 @@ static void load_providers(VpApp *app) {
             else if (strcmp(line, "romm_token") == 0) (void)snprintf(romm_config.token, sizeof(romm_config.token), "%s", equals);
             else if (strcmp(line, "image_proxy_url") == 0)
                 (void)snprintf(romm_config.image_proxy_url, sizeof(romm_config.image_proxy_url), "%s", equals);
+            else if (strcmp(line, "tls_debug") == 0)
+                romm_config.tls_debug = strcmp(equals, "1") == 0;
+            else if (strcmp(line, "tls12") == 0)
+                romm_config.tls12 = strcmp(equals, "1") == 0;
 #ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
             else if (strcmp(line, "image_install_id") == 0)
                 (void)snprintf(image_install_id, sizeof(image_install_id), "%s", equals);
@@ -565,6 +571,8 @@ static bool save_romm_config(void) {
                      homebrew_config.catalog_url, active_theme);
 #endif
     (void)fprintf(file, "steamgriddb_api_key=%s\n", steamgrid_api_key);
+    (void)fprintf(file, "tls_debug=%d\ntls12=%d\n", romm_config.tls_debug ? 1 : 0,
+                  romm_config.tls12 ? 1 : 0);
     (void)fprintf(file, "active_view=%s\n", vp_view_name(app.active_view));
     (void)fprintf(file, "ui_wallpaper=%s\nui_text_color=%s\nui_wallpaper_animated=%d\n",
                   vp_ui_wallpaper(ui_preferences.wallpaper)->id,
@@ -883,10 +891,15 @@ static void *background_job_run(void *context) {
         if (succeeded) for (size_t i=0;i<job->catalog.count;i++)
             (void)vp_local_artwork_load(&job->catalog.items[i],VP_ARTWORK_CACHE);
     } else if (kind == VP_JOB_CHECK_STEAMGRID || kind == VP_JOB_CHECK_IMAGES) {
-        VpRommProbeBackend backend={vp_vita_probe_service,NULL};
+        VpRommProbeBackend backend={vp_vita_probe_service,&config};
+        if (kind == VP_JOB_CHECK_IMAGES)
+            vp_vita_log_image_event(VP_IMAGE_LOG_HEALTH_START, 0, 0, false);
         job->connection_state=kind==VP_JOB_CHECK_STEAMGRID?
             vp_steamgrid_check(job->steamgrid_key,backend):vp_image_service_check(
                 config.image_proxy_url[0]?config.image_proxy_url:config.base_url,backend);
+        if (kind == VP_JOB_CHECK_IMAGES)
+            vp_vita_log_image_event(job->connection_state == VP_CONNECTION_CONNECTED ?
+                                    VP_IMAGE_LOG_HEALTH_OK : VP_IMAGE_LOG_HEALTH_FAILED, 0, 0, false);
         if (kind==VP_JOB_CHECK_IMAGES && vp_image_session_active() &&
             !vp_image_session_ensure(config.image_proxy_url)) {
             if (job->connection_state==VP_CONNECTION_CONNECTED)
@@ -894,7 +907,7 @@ static void *background_job_run(void *context) {
         }
         succeeded=job->connection_state==VP_CONNECTION_CONNECTED;
     } else if (kind == VP_JOB_SYNC_STEAMGRID) {
-        VpRommProbeBackend backend={vp_vita_probe_service,NULL};
+        VpRommProbeBackend backend={vp_vita_probe_service,&config};
         VpCoverTransformBackend transform={vp_vita_transform_cover,NULL};
         succeeded=true;
         job->connection_state=vp_steamgrid_check(job->steamgrid_key,backend);
@@ -1562,7 +1575,7 @@ static void settings_finish_ime(VpApp *app) {
                     integration_revision++;
 #ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
                     (void)vp_image_session_configure(romm_config.image_proxy_url[0]?
-                        romm_config.image_proxy_url:NULL);
+                        romm_config.image_proxy_url:NULL, romm_config.tls_debug, romm_config.tls12);
 #endif
                     steamgrid_state=steamgrid_api_key[0]?VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
                     image_service_state=romm_config.image_proxy_url[0]?VP_CONNECTION_NOT_CHECKED:VP_CONNECTION_UNCONFIGURED;
@@ -1592,7 +1605,7 @@ static void settings_finish_ime(VpApp *app) {
             memset(romm_pair_code, 0, sizeof(romm_pair_code));
 #ifdef VP_IMAGE_SERVICE_AUTH_CLIENT
             (void)vp_image_session_configure(romm_config.image_proxy_url[0]?
-                romm_config.image_proxy_url:NULL);
+                romm_config.image_proxy_url:NULL, romm_config.tls_debug, romm_config.tls12);
 #endif
             if (!romm_config.image_proxy_url[0]) {
                 integration_revision++;
@@ -3116,7 +3129,7 @@ int main(void) {
         if (!vp_image_session_installation_id(image_install_id, sizeof(image_install_id)))
             image_install_id[0]='\0';
         (void)vp_image_session_configure(romm_config.image_proxy_url[0]?
-            romm_config.image_proxy_url:NULL);
+            romm_config.image_proxy_url:NULL, romm_config.tls_debug, romm_config.tls12);
         if (strcmp(previous_install_id, image_install_id) != 0 &&
             (providers_config_exists || vp_image_session_active()))
             (void)save_romm_config();
