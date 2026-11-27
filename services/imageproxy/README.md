@@ -106,19 +106,23 @@ For Tailscale installed **on the Dokploy server host**, use
 `services/imageproxy/compose.dokploy-funnel.yml` **instead of**
 `compose.dokploy.yml`. This is a standalone alternative, not a Compose override.
 It keeps imageproxy off host ports and routes all public requests through Traefik's
-rate limiter. The original domain/Let's Encrypt deployment remains unchanged.
+rate limiter. A small TCP relay publishes only host loopback port `8091`, so no
+additional port mapping is needed on Dokploy's Traefik container. The original
+domain/Let's Encrypt deployment remains unchanged.
 
 ```text
-Internet -> Funnel HTTPS -> host loopback:8091 -> Traefik -> imageproxy:8090
+Internet -> Funnel HTTPS -> host loopback:8091 -> TCP relay -> Traefik:8091 -> imageproxy:8090
 ```
 
 #### 1. Prepare Traefik's private entrypoint
 
-These are **manual server-side changes** to Dokploy's Traefik deployment, which is
-not managed by this repository. Back up its configuration and preserve its existing
-entrypoints, ports, Docker provider, and connection to `dokploy-network`.
+This deployment requires Dokploy's Traefik container, named `dokploy-traefik`, to
+use **bridge networking** and join `dokploy-network`. Host networking is not
+supported by this Compose variant.
 
-If Traefik uses a **bridge network**, add this entry to its static configuration:
+In Dokploy's **Traefik File System** editor, back up `traefik.yml`, then add
+`funnel` under its existing `entryPoints` mapping. Preserve all existing entries,
+ports, providers, and other settings; do not replace the whole file:
 
 ```yaml
 entryPoints:
@@ -126,27 +130,21 @@ entryPoints:
     address: ":8091"
 ```
 
-Add this port mapping to the **Traefik container**, not imageproxy:
+Apply this static configuration with **Settings → Web Server → Traefik → Reload**.
+Reloading Traefik can briefly interrupt other applications on the server.
 
-```yaml
-ports:
-  - "127.0.0.1:8091:8091"
-```
+**Do not add `8091` in Traefik's Additional Port Mappings dialog.** The relay in
+this repository owns `127.0.0.1:8091`; Traefik listens on `8091` only inside its
+Docker network. If you previously published that Traefik port, remove its mapping
+before deploying the relay, without changing the existing `80` and `443` mappings.
 
-If Traefik uses **host networking**, do not add a Docker port mapping. Instead bind
-the entrypoint directly to loopback:
-
-```yaml
-entryPoints:
-  funnel:
-    address: "127.0.0.1:8091"
-```
-
-Restart Traefik after changing its static configuration. Do not enable TLS,
-HTTP-to-HTTPS redirects, or forwarding to the dashboard on this entrypoint.
-Funnel supplies public HTTPS; the unencrypted hop is local to this server.
-Keep `8091` blocked from external interfaces, including IPv6, and do not enable
-`forwardedHeaders.insecure` or blindly trust client-supplied forwarded headers.
+Do not enable TLS, HTTP-to-HTTPS redirects, or dashboard forwarding on the
+`funnel` entrypoint. Funnel supplies public HTTPS; the unencrypted hops stay on
+this server. Keep `8091` blocked from external interfaces, including IPv6, and do
+not enable `forwardedHeaders.insecure` or trust client-supplied forwarded headers.
+The relay forwards TCP bytes unchanged, preserving the Host header and application
+authentication. It resolves `dokploy-traefik` for each new connection, so new
+requests can recover after Traefik is recreated with a different container IP.
 
 #### 2. Deploy the Funnel variant
 
@@ -174,6 +172,15 @@ sudo tailscale funnel --bg 8091
 tailscale funnel status
 ```
 
+If you already use public port `8443`, keep that port instead:
+
+```sh
+sudo tailscale funnel --bg --https=8443 http://127.0.0.1:8091
+```
+
+Include `:8443` in public test URLs and the launcher's `image_proxy_url`, but not
+in `IMAGE_PROXY_FUNNEL_HOST`.
+
 Follow any Tailscale approval prompts. The background configuration resumes when
 Tailscale starts after a reboot. Do not point Funnel at imageproxy's `8090` port or
 at a general-purpose Traefik/dashboard entrypoint.
@@ -191,6 +198,13 @@ curl --fail https://image-server.your-tailnet.ts.net/health
 curl -i -X POST 'https://image-server.your-tailnet.ts.net/image?width=1&height=1'
 ```
 
+If the local health check reports connection refused, check the `funnel-relay`
+container's status and logs in Dokploy. A `502` from the public URL alone does not
+identify which upstream hop failed. Check relay logs for DNS/connect errors and
+Traefik logs for a missing `funnel` entrypoint, then repeat the local health check.
+After a planned Traefik recreation, verify it again without restarting the relay;
+in-flight requests may fail during recreation, but new requests should recover.
+
 Also verify from another machine that direct access to the server's ports `8090`
 and `8091` fails. Confirm Traefik emits `429` when its configured request limit is
 exceeded, using a controlled test before production traffic. The reverse-proxy
@@ -204,8 +218,9 @@ DNS name unchanged to retain the hostname. No browser/email authentication gate
 is needed: the launcher uses the service's existing challenge/session protocol.
 
 To stop public sharing, run `sudo tailscale funnel off`. To revert the deployment,
-select `compose.dokploy.yml` again with a valid `IMAGE_PROXY_DOMAIN`, then remove
-the private Traefik entrypoint and its loopback mapping when no longer needed.
+select `compose.dokploy.yml` again with a valid `IMAGE_PROXY_DOMAIN`, remove the
+orphaned `funnel-relay` container (which releases loopback port `8091`), and remove
+the private Traefik entrypoint when no longer needed.
 
 Validate both Compose variants locally without starting containers:
 

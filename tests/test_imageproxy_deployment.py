@@ -25,6 +25,39 @@ def compose_config(filename, **variables):
 
 
 class ImageproxyDeploymentTests(unittest.TestCase):
+    def test_funnel_relay_publishes_only_loopback_and_targets_traefik(self):
+        result = compose_config(
+            "compose.dokploy-funnel.yml",
+            IMAGE_PROXY_FUNNEL_HOST="image-server.example.ts.net",
+            IMAGE_PROXY_KEY="test-only-key",
+            IMAGE_PROXY_KEY_ID="test-key-id",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        services = json.loads(result.stdout)["services"]
+        self.assertIn("funnel-relay", services)
+        relay = services["funnel-relay"]
+        ports = relay["ports"]
+        self.assertEqual(len(ports), 1)
+        self.assertEqual(ports[0]["host_ip"], "127.0.0.1")
+        self.assertEqual(ports[0]["published"], "8091")
+        self.assertEqual(ports[0]["target"], 8091)
+        self.assertEqual(ports[0]["protocol"], "tcp")
+        self.assertNotIn("network_mode", relay)
+        self.assertIn("dokploy-network", relay["networks"])
+        self.assertEqual(relay["restart"], "unless-stopped")
+        self.assertEqual(relay["labels"]["traefik.enable"], "false")
+        self.assertEqual(relay["command"], [
+            "TCP4-LISTEN:8091,bind=0.0.0.0,reuseaddr,fork,max-children=64",
+            "TCP4-CONNECT:dokploy-traefik:8091,connect-timeout=5",
+        ])
+        self.assertEqual(relay["user"], "65534:65534")
+        self.assertTrue(relay["read_only"])
+        self.assertEqual(relay["cap_drop"], ["ALL"])
+        self.assertIn("no-new-privileges:true", relay["security_opt"])
+        self.assertTrue(relay["image"].startswith("alpine/socat:1.8.0.3@sha256:"))
+        self.assertEqual(sum(len(service.get("ports", []))
+                             for service in services.values()), 1)
+
     def test_funnel_preserves_controlled_ingress(self):
         result = compose_config(
             "compose.dokploy-funnel.yml",
