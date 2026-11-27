@@ -169,6 +169,8 @@ typedef struct {
     char base_url[VP_URL];
     char token[VP_TEXT];
     char image_proxy_url[VP_URL];
+    bool tls_debug;
+    bool tls12;
 } VpRommConfig;
 
 typedef enum {
