@@ -52,6 +52,92 @@ class SemanticVersionTests(unittest.TestCase):
             next_semver("2.4", "PATCH")
 
 
+class LegacyReleaseVersionTests(unittest.TestCase):
+    def run_release_tools(self, messages: list[str]) -> tuple[subprocess.CompletedProcess, subprocess.CompletedProcess]:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            def git(*args: str) -> str:
+                result = subprocess.run(
+                    ["git", "-c", "user.name=Release Test", "-c",
+                     "user.email=release-test@example.invalid", *args],
+                    cwd=temp_dir, text=True, capture_output=True, check=True,
+                )
+                return result.stdout.strip()
+
+            git("init", "--quiet")
+            git("commit", "--allow-empty", "-m", "PATCH: initial fixture")
+            base = git("rev-parse", "HEAD")
+            for message in messages:
+                git("commit", "--allow-empty", "-m", message)
+            revision_range = f"{base}..HEAD"
+            version = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "next_version.py"),
+                 "--current", "v0.14.0", "--range", revision_range],
+                cwd=temp_dir, text=True, capture_output=True,
+            )
+            validation = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "validate_commits.py"), revision_range],
+                cwd=temp_dir, text=True, capture_output=True,
+            )
+            return version, validation
+
+    def test_legacy_subjects_select_versions_but_remain_invalid_new_commits(self) -> None:
+        for message, expected in (
+            ("feat(vita): add analog navigation", "v0.15.0"),
+            ("fix(vita): restore footer", "v0.14.1"),
+            ("perf(vita): raise worker priority", "v0.14.1"),
+            ("feat: add navigation", "v0.15.0"),
+            ("fix(api)!: remove old endpoint", "v1.0.0"),
+            ("feat(api): replace endpoint\n\nBREAKING CHANGE: old endpoint removed", "v1.0.0"),
+            ("perf: replace cache\n\nBREAKING-CHANGE: incompatible layout", "v1.0.0"),
+        ):
+            with self.subTest(message=message):
+                version, validation = self.run_release_tools([message])
+                self.assertEqual(0, version.returncode, version.stderr)
+                self.assertEqual(expected + "\n", version.stdout)
+                self.assertEqual("", version.stderr)
+                self.assertNotEqual(0, validation.returncode)
+                self.assertIn("subject must be", validation.stderr)
+
+    def test_mixed_history_selects_highest_release_level(self) -> None:
+        version, validation = self.run_release_tools([
+            "fix: correct legacy bug", "feat: add legacy feature", "PATCH(ci): repair release",
+        ])
+        self.assertEqual(0, version.returncode, version.stderr)
+        self.assertEqual("v0.15.0\n", version.stdout)
+        self.assertEqual("", version.stderr)
+        self.assertNotEqual(0, validation.returncode)
+
+    def test_explicit_release_intent_still_works(self) -> None:
+        version, validation = self.run_release_tools([
+            "PATCH: fix crash", "MINOR(ui): add view", "MAJOR(api)!: replace endpoint",
+        ])
+        self.assertEqual(0, version.returncode, version.stderr)
+        self.assertEqual("v1.0.0\n", version.stdout)
+        self.assertEqual("", version.stderr)
+        self.assertEqual(0, validation.returncode, validation.stderr)
+        self.assertIn("validated 3 commit(s)", validation.stdout)
+
+    def test_explicit_patch_level_is_not_reinterpreted(self) -> None:
+        for message in (
+            "PATCH!: preserve explicit level",
+            "PATCH: change\n\nBREAKING CHANGE: preserve explicit level",
+        ):
+            with self.subTest(message=message):
+                version, validation = self.run_release_tools([message])
+                self.assertEqual((0, "v0.14.1\n", ""),
+                                 (version.returncode, version.stdout, version.stderr))
+                self.assertEqual(0, validation.returncode, validation.stderr)
+
+    def test_unknown_or_malformed_subjects_are_not_silently_ignored(self) -> None:
+        for message in ("add an endpoint", "feat: ", "chore: unrelated task"):
+            with self.subTest(message=message):
+                version, validation = self.run_release_tools([message])
+                self.assertNotEqual(0, version.returncode)
+                self.assertEqual("", version.stdout)
+                self.assertIn("subject must be", version.stderr)
+                self.assertNotEqual(0, validation.returncode)
+
+
 class CommitMsgHookTests(unittest.TestCase):
     def test_hook_script_accepts_and_rejects_messages(self) -> None:
         hook = ROOT / "githooks" / "commit-msg"

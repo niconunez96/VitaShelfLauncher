@@ -67,4 +67,30 @@ Install the versioned commit-message hook once:
 ./scripts/install-git-hooks.sh
 ```
 
-Commit subjects must start with `PATCH`, `MINOR`, or `MAJOR`; CI enforces the same rule.
+Commit subjects must use `<PATCH|MINOR|MAJOR>(optional-scope): summary`; CI enforces
+the same rule. For example:
+
+```text
+PATCH(ci): handle legacy release history
+MINOR(image): add Tailscale Funnel deployment
+MAJOR(api): remove an incompatible endpoint
+```
+
+Release version calculation also recognizes historical `feat` (MINOR), `fix`
+(PATCH), and `perf` (PATCH) subjects. A legacy `!` marker or `BREAKING CHANGE:` /
+`BREAKING-CHANGE:` footer selects MAJOR. This compatibility applies only to
+`scripts/next_version.py`: new commits and pull request titles must still use
+explicit uppercase release levels. Unknown or malformed subjects are rejected,
+not silently skipped.
+
+To preview a release from the last tag without creating a tag or publishing:
+
+```sh
+python3 scripts/next_version.py --current v0.14.0 --range v0.14.0..HEAD
+```
+
+Replace `v0.14.0` with the latest release tag. To validate only the latest commit:
+
+```sh
+python3 scripts/validate_commits.py HEAD~1..HEAD
+```
