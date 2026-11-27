@@ -11,7 +11,7 @@ HEADER = (ROOT / "include" / "vitashelflauncher.h").read_text()
 CORE = (ROOT / "src" / "core" / "vitashelflauncher.c").read_text()
 MAIN = (ROOT / "src" / "vita" / "main.c").read_text()
 RENDERER = (ROOT / "src" / "vita" / "ui_renderer.c").read_text()
-README = (ROOT / "README.md").read_text()
+GAMES_GUIDE = (ROOT / "guides" / "initialize_games.md").read_text()
 
 
 def function_source(source, name):
@@ -58,7 +58,7 @@ class VitaDownloadLifecycleTests(unittest.TestCase):
         self.assertIn("Pausada", RENDERER)
         self.assertIn("Reintentar", RENDERER)
         self.assertIn("Quitar", RENDERER)
-        self.assertIn("Cuadrado", README)
+        self.assertIn("press `X` to resume or `Square` to remove the queued item", GAMES_GUIDE)
 
 
 class VitaPspRomStagingTests(unittest.TestCase):

@@ -13,13 +13,28 @@ SCREENSHOTS = (
     "docs/images/vitashelf-roms-list.png",
     "docs/images/vitashelf-roms-carousel.png",
 )
+GUIDES = (
+    "guides/configure_romm.md",
+    "guides/configure_image_service.md",
+    "guides/configure_steamgriddb.md",
+    "guides/initialize_games.md",
+    "guides/customize_appearance.md",
+    "guides/problems_debugging.md",
+)
 
 
 class ReadmeScreenshotTests(unittest.TestCase):
     def test_readme_links_current_public_screenshots(self):
-        self.assertIn("## Capturas / Screenshots", README)
+        self.assertIn("## Screenshots", README)
         for relative_path in SCREENSHOTS:
             self.assertIn(f"]({relative_path})", README)
+
+    def test_readme_links_existing_setup_guides(self):
+        self.assertIn("## Setup guides", README)
+        for relative_path in GUIDES:
+            with self.subTest(relative_path=relative_path):
+                self.assertIn(f"]({relative_path})", README)
+                self.assertTrue((ROOT / relative_path).is_file())
 
     def test_screenshots_are_vita_resolution_pngs(self):
         for relative_path in SCREENSHOTS:
